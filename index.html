@@ -4,764 +4,126 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Creator Textbook — Cre8Club</title>
-<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,400;0,500;0,600;1,400&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.44.0/tabler-icons.min.css">
-<script type="module">
-import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
-import { getFirestore, doc, setDoc, getDoc, collection, getDocs, onSnapshot } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
-
-const firebaseConfig = {
-  apiKey: "AIzaSyBYT9INQHIeVmVUbB6-0Qt98w1mnJRz7oA",
-  authDomain: "cre8club.firebaseapp.com",
-  projectId: "cre8club",
-  storageBucket: "cre8club.firebasestorage.app",
-  messagingSenderId: "1047210088180",
-  appId: "1:1047210088180:web:70b85b3702c7db88da30a1",
-  measurementId: "G-KCQ30Q9SVS"
-};
-
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
-
-// ── State ──
-let currentUser = null;
-let userData = {};
-let allUsers = [];
-let mode = 'user';
-let currentSec = 's01';
-let presentIdx = 0;
-let viewingUid = null; // 管理者が見ているユーザーのUID
-let saveTimer = null;
-
-// ── Admin UIDs (先生のGoogleアカウントUID) ──
-// ログイン後にFirestoreのadminsコレクションで管理
-let isAdmin = false;
-
-// ── Sections ──
-const SECTIONS_BASIC = [
-  {id:'s01',num:'01',label:'KGI / KPI 設定',fields:['purpose_text','purpose_num','kgi_text','kgi_num','kpi1_text','kpi1_num','kpi3_text','kpi3_num','kpi6_text','kpi6_num']},
-  {id:'s02',num:'02',label:'自分の強み分析',fields:['strengths_list','strengths_summary']},
-  {id:'s03',num:'03',label:'インスタニーズマップ',fields:['needs']},
-  {id:'s04',num:'04',label:'自分の強み × ニーズ',fields:['cross']},
-  {id:'s05',num:'05',label:'ペルソナ設定',fields:['persona_gender','persona_age','persona_area','persona_job','persona_income','persona_married','persona_kids','persona_hobby','persona_worry','persona_summary']},
-  {id:'s06',num:'06',label:'仮コンセプト設計',fields:['concept_draft']},
-  {id:'s07',num:'07',label:'競合リサーチ',fields:['rivals']},
-  {id:'s08',num:'08',label:'伸び投稿リサーチ',fields:['top_posts']},
-  {id:'s09',num:'09',label:'独自テーマ発掘',fields:['theme_gap','theme_trend','theme_continue','theme_enjoy','theme']},
-  {id:'s10',num:'10',label:'正式コンセプト設計',fields:['concept_final']},
-];
-const SECTIONS_APPLIED = [
-  {id:'a1',num:'A1',label:'ユーザーネーム設定',fields:['username_candidate','username_final']},
-  {id:'a2',num:'A2',label:'アカウント名設定',fields:['accname_candidate','accname_final']},
-  {id:'a3',num:'A3',label:'アイコン設定',fields:['icon']},
-  {id:'a4',num:'A4',label:'プロフィール設計',fields:['profile_candidate','profile_final']},
-  {id:'a5',num:'A5',label:'投稿・リール設計',fields:['reel_concept']},
-];
-const SEC_IG = {id:'ig',num:'★',label:'Your Account Information',fields:[]};
-const ALL_SECTIONS = [...SECTIONS_BASIC,...SECTIONS_APPLIED];
-
-// ── Auth ──
-window.loginWithGoogle = async () => {
-  const provider = new GoogleAuthProvider();
-  try { await signInWithPopup(auth, provider); } catch(e) { console.error(e); }
-};
-window.logout = async () => {
-  await signOut(auth);
-  currentUser = null; userData = {}; allUsers = [];
-  renderLogin();
-};
-
-onAuthStateChanged(auth, async (user) => {
-  if (user) {
-    currentUser = user;
-    viewingUid = user.uid;
-    await loadUserData(user.uid);
-    await checkAdmin(user.uid);
-    await loadAllUsers();
-    renderApp();
-  } else {
-    renderLogin();
-  }
-});
-
-// ── Firestore ──
-async function loadUserData(uid) {
-  const snap = await getDoc(doc(db, 'users', uid));
-  if (snap.exists()) userData = snap.data();
-  else {
-    userData = { name: currentUser.displayName, email: currentUser.email, photoURL: currentUser.photoURL };
-    await saveUserData(uid);
-  }
-}
-
-async function saveUserData(uid) {
-  clearTimeout(saveTimer);
-  saveTimer = setTimeout(async () => {
-    try {
-      await setDoc(doc(db, 'users', uid), userData, { merge: true });
-      showSaved();
-    } catch(e) { console.error('Save error:', e); }
-  }, 800);
-}
-
-async function checkAdmin(uid) {
-  try {
-    const snap = await getDoc(doc(db, 'admins', uid));
-    isAdmin = snap.exists();
-  } catch(e) { isAdmin = false; }
-}
-
-async function loadAllUsers() {
-  try {
-    const snap = await getDocs(collection(db, 'users'));
-    allUsers = [];
-    snap.forEach(d => allUsers.push({ uid: d.id, ...d.data() }));
-  } catch(e) { allUsers = []; }
-}
-
-function gf(field, uid) {
-  const d = uid && uid !== currentUser?.uid ? {} : userData;
-  return d[field] || '';
-}
-function sf(field, val) {
-  userData[field] = val;
-  saveUserData(currentUser.uid);
-  renderNav();
-  renderProgress();
-}
-
-function showSaved() {
-  const el = document.getElementById('save-indicator');
-  if (!el) return;
-  el.style.opacity = '1';
-  setTimeout(() => { if(el) el.style.opacity = '0'; }, 2000);
-}
-
-// ── Render helpers ──
-function getField(field) { return userData[field] || ''; }
-function getCheckState(secId, idx) {
-  try { return (userData[`chk_${secId}`] || {})[idx] || false; } catch(e) { return false; }
-}
-function setCheckState(secId, idx, val) {
-  const key = `chk_${secId}`;
-  if (!userData[key]) userData[key] = {};
-  userData[key][idx] = val;
-  saveUserData(currentUser.uid);
-}
-
-function calcProgress() {
-  const total = ALL_SECTIONS.reduce((n,s) => n + (s.fields ? s.fields.length : 0), 0);
-  const filled = ALL_SECTIONS.reduce((n,s) => {
-    if (!s.fields) return n;
-    return n + s.fields.filter(f => getField(f)).length;
-  }, 0);
-  return { total, filled, pct: total ? Math.round(filled/total*100) : 0 };
-}
-
-function calcProgressForUser(data) {
-  const total = ALL_SECTIONS.reduce((n,s) => n + (s.fields ? s.fields.length : 0), 0);
-  const filled = ALL_SECTIONS.reduce((n,s) => {
-    if (!s.fields) return n;
-    return n + s.fields.filter(f => data[f]).length;
-  }, 0);
-  return { total, filled, pct: total ? Math.round(filled/total*100) : 0 };
-}
-
-// ── Login screen ──
-function renderLogin() {
-  document.getElementById('app').innerHTML = `
-    <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0d1b2a;">
-      <div style="background:#fff;border-radius:20px;padding:48px 40px;width:360px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.3)">
-        <div style="font-size:24px;font-weight:600;margin-bottom:6px">Creator <span style="color:#E1306C">Textbook</span></div>
-        <div style="font-size:12px;color:#a09a93;font-family:'DM Mono',monospace;margin-bottom:32px">by Cre8Club</div>
-        <div style="font-size:14px;color:#6b6560;line-height:1.7;margin-bottom:32px">インスタグラム運用講座の<br>ワークブックアプリです</div>
-        <button onclick="loginWithGoogle()" style="width:100%;padding:14px;font-size:14px;font-weight:600;border-radius:12px;border:1.5px solid #e8e5e0;background:#fff;color:#1a1816;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px;font-family:'DM Sans',sans-serif;transition:all .15s" onmouseover="this.style.background='#f5f4f2'" onmouseout="this.style.background='#fff'">
-          <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M16.51 8H8.98v3h4.3c-.18 1-.74 1.48-1.6 2.04v2.01h2.6a7.8 7.8 0 0 0 2.38-5.88c0-.57-.05-.66-.15-1.18z"/><path fill="#34A853" d="M8.98 17c2.16 0 3.97-.72 5.3-1.94l-2.6-2.04a4.8 4.8 0 0 1-7.18-2.54H1.83v2.07A8 8 0 0 0 8.98 17z"/><path fill="#FBBC05" d="M4.5 10.52a4.8 4.8 0 0 1 0-3.04V5.41H1.83a8 8 0 0 0 0 7.18l2.67-2.07z"/><path fill="#EA4335" d="M8.98 4.18c1.17 0 2.23.4 3.06 1.2l2.3-2.3A8 8 0 0 0 1.83 5.4L4.5 7.49a4.77 4.77 0 0 1 4.48-3.3z"/></svg>
-          Googleアカウントでログイン
-        </button>
-        <p style="margin-top:16px;font-size:11px;color:#a09a93">Cre8Clubのメンバーのみ利用できます</p>
-      </div>
-    </div>`;
-}
-
-// ── Main app ──
-function renderApp() {
-  const { pct, filled, total } = calcProgress();
-  const secData = [...ALL_SECTIONS, SEC_IG];
-  const currentSecData = secData.find(s => s.id === currentSec) || secData[0];
-
-  document.getElementById('app').innerHTML = `
-    <div class="app-shell">
-      <!-- Top Header -->
-      <header class="top-header">
-        <div class="header-left">
-          <div class="logo">Creator <span>Textbook</span></div>
-          <div class="logo-sub">by Cre8Club</div>
-        </div>
-        <div class="header-center">
-          <div class="mode-tabs">
-            <button class="mode-tab ${mode==='user'?'active':''}" onclick="setMode('user')"><i class="ti ti-user"></i> ワークブック</button>
-            <button class="mode-tab ${mode==='admin'?'active':''}" onclick="setMode('admin')"><i class="ti ti-layout-grid"></i> 管理者</button>
-            <button class="mode-tab ${mode==='present'?'active':''}" onclick="setMode('present')"><i class="ti ti-presentation"></i> 発表</button>
-          </div>
-        </div>
-        <div class="header-right">
-          <span id="save-indicator" style="font-size:11px;color:#0f9e7b;opacity:0;transition:opacity .3s;display:flex;align-items:center;gap:4px"><i class="ti ti-check"></i> 保存済み</span>
-          <img src="${currentUser.photoURL}" style="width:32px;height:32px;border-radius:50%;object-fit:cover" alt="avatar">
-          <span style="font-size:13px;font-weight:500">${currentUser.displayName}</span>
-          <button onclick="logout()" class="btn-ghost"><i class="ti ti-logout"></i></button>
-        </div>
-      </header>
-
-      <!-- Section Nav -->
-      <nav class="sec-nav" id="sec-nav" ${mode!=='user'?'style="display:none"':''}>
-        <div class="sec-nav-inner">
-          <div class="nav-group">
-            <button class="nav-group-btn" onclick="toggleGroup('basic')">
-              <span>基本編</span><i class="ti ti-chevron-down" id="basic-chevron"></i>
-            </button>
-            <div class="nav-group-items" id="basic-items">
-              ${SECTIONS_BASIC.map(s => {
-                const done = s.fields && s.fields.some(f => getField(f));
-                return `<button class="nav-item ${s.id===currentSec?'active':''} ${done?'done':''}" onclick="goSec('${s.id}')">
-                  <span class="nav-num">${s.num}</span><span>${s.label}</span>
-                  ${done?'<span class="nav-done-dot"></span>':''}
-                </button>`;
-              }).join('')}
-            </div>
-          </div>
-          <div class="nav-group">
-            <button class="nav-group-btn" onclick="toggleGroup('applied')">
-              <span>応用編</span><i class="ti ti-chevron-down" id="applied-chevron"></i>
-            </button>
-            <div class="nav-group-items" id="applied-items">
-              ${SECTIONS_APPLIED.map(s => {
-                const done = s.fields && s.fields.some(f => getField(f));
-                return `<button class="nav-item ${s.id===currentSec?'active':''} ${done?'done':''}" onclick="goSec('${s.id}')">
-                  <span class="nav-num">${s.num}</span><span>${s.label}</span>
-                  ${done?'<span class="nav-done-dot"></span>':''}
-                </button>`;
-              }).join('')}
-            </div>
-          </div>
-          <button class="nav-item ${currentSec==='ig'?'active':''}" onclick="goSec('ig')" style="margin:4px 8px;border-radius:8px">
-            <span class="nav-num" style="color:#E1306C">★</span><span>Your Account Information</span>
-          </button>
-        </div>
-        <div class="nav-progress">
-          <div style="display:flex;justify-content:space-between;font-size:11px;color:#6b6560;margin-bottom:5px">
-            <span>入力進捗</span><span>${pct}%（${filled}/${total}）</span>
-          </div>
-          <div style="height:4px;background:#e8e5e0;border-radius:2px;overflow:hidden">
-            <div style="height:100%;background:#E1306C;border-radius:2px;width:${pct}%;transition:width .4s"></div>
-          </div>
-        </div>
-      </nav>
-
-      <!-- Content -->
-      <main class="main-content" id="main-content"></main>
-    </div>`;
-
-  renderContent();
-
-  // ドロップダウン外クリックで閉じる
-  document.getElementById('app').addEventListener('click', (e) => {
-    if (!e.target.closest('.nav-group')) {
-      document.querySelectorAll('.nav-group-items').forEach(el => el.classList.remove('open'));
-      document.querySelectorAll('[id$="-chevron"]').forEach(el => el.style.transform = 'rotate(0deg)');
-    }
-  });
-}
-
-function renderNav() {
-  if (mode !== 'user') return;
-  const nav = document.getElementById('sec-nav');
-  if (!nav) return;
-  // 進捗だけ更新
-  renderProgress();
-  // navアイテムのactive/done更新
-  document.querySelectorAll('.nav-item').forEach(btn => {
-    const secId = btn.getAttribute('onclick')?.match(/'([^']+)'/)?.[1];
-    if (!secId) return;
-    btn.classList.toggle('active', secId === currentSec);
-    const sec = ALL_SECTIONS.find(s => s.id === secId);
-    if (sec) btn.classList.toggle('done', sec.fields && sec.fields.some(f => getField(f)));
-  });
-}
-
-function renderProgress() {
-  const { pct, filled, total } = calcProgress();
-  const pctEl = document.querySelector('.nav-progress');
-  if (pctEl) {
-    pctEl.innerHTML = `
-      <div style="display:flex;justify-content:space-between;font-size:11px;color:#6b6560;margin-bottom:5px">
-        <span>入力進捗</span><span>${pct}%（${filled}/${total}）</span>
-      </div>
-      <div style="height:4px;background:#e8e5e0;border-radius:2px;overflow:hidden">
-        <div style="height:100%;background:#E1306C;border-radius:2px;width:${pct}%;transition:width .4s"></div>
-      </div>`;
-  }
-}
-
-window.toggleGroup = (id) => {
-  const items = document.getElementById(`${id}-items`);
-  const chevron = document.getElementById(`${id}-chevron`);
-  if (!items) return;
-  const isOpen = items.classList.contains('open');
-  // 他のドロップダウンを閉じる
-  document.querySelectorAll('.nav-group-items').forEach(el => {
-    if (el.id !== `${id}-items`) {
-      el.classList.remove('open');
-    }
-  });
-  document.querySelectorAll('[id$="-chevron"]').forEach(el => {
-    if (el.id !== `${id}-chevron`) el.style.transform = 'rotate(0deg)';
-  });
-  items.classList.toggle('open', !isOpen);
-  if (chevron) chevron.style.transform = isOpen ? 'rotate(0deg)' : 'rotate(180deg)';
-};
-
-window.setMode = (m) => {
-  mode = m;
-  if (m === 'present') presentIdx = 0;
-  renderApp();
-};
-
-window.goSec = (id) => {
-  currentSec = id;
-  renderNav();
-  renderContent();
-};
-
-function renderContent() {
-  const area = document.getElementById('main-content');
-  if (!area) return;
-  if (mode === 'admin') { renderAdmin(area); return; }
-  if (mode === 'present') { renderPresent(area); return; }
-  switch(currentSec) {
-    case 's01': renderKGI(area); break;
-    case 's02': renderStrengths(area); break;
-    case 's03': renderTextSec(area,'s03','03','インスタニーズマップ','インスタユーザーが求めているものを書き出しましょう','needs','・行った気になれる体験\n・絶景・穴場スポット情報\n・真似できる編集テクニック\n・旅行計画のヒント'); break;
-    case 's04': renderTextSec(area,'s04','04','自分の強み × ニーズ','強みとニーズを掛け合わせてポジションを見つけましょう','cross','例）大阪在住 × 関西穴場情報ニーズ → 関西特化の絶景スポット紹介'); break;
-    case 's05': renderPersona(area); break;
-    case 's06': renderTextSec(area,'s06','06','仮コンセプト設計','強み × ニーズ × ペルソナを一文にまとめましょう','concept_draft','例）週末だけ旅する20代女性のために、関西の映える穴場スポットをショート動画で届けるクリエイター'); break;
-    case 's07': renderRivals(area); break;
-    case 's08': renderTopPosts(area); break;
-    case 's09': renderTheme(area); break;
-    case 's10': renderConceptFinal(area); break;
-    case 'a1': renderCheckSec(area,'a1','A1','ユーザーネーム設定',['ジャンルのキーワードが入っているか','短くて覚えやすいか','他のアカウントと被っていないか','長く使い続けられるか'],'username_candidate','username_final','確定ユーザーネーム'); break;
-    case 'a2': renderCheckSec(area,'a2','A2','アカウント名設定',['検索されうるキーワードが入っているか','名前も入っているか','キーワードと名前の順番が正しいか','GoogleのSEOを意識できているか'],'accname_candidate','accname_final','確定アカウント名'); break;
-    case 'a3': renderIconSec(area); break;
-    case 'a4': renderCheckSec(area,'a4','A4','プロフィール設計',['箇条書きになっているか','投稿しているジャンルが明記されているか','中学生でも分かりやすいか','フォローするメリットが伝わるか','このアカウントの説明になっているか'],'profile_candidate','profile_final','確定プロフィール',true); break;
-    case 'a5': renderReelSec(area); break;
-    case 'ig': renderIG(area); break;
-  }
-}
-
-// ── Section renderers ──
-function card(num, title, hint, content) {
-  return `<div class="form-card">
-    <div class="sec-header">
-      <div class="sec-num-circle">${num}</div>
-      <div><div class="sec-title">${title}</div>${hint?`<div class="sec-hint">${hint}</div>`:''}</div>
-    </div>
-    ${content}
-  </div>`;
-}
-
-function renderKGI(area) {
-  const rows = [
-    {k:'purpose',l:'運用目的',badge:null},
-    {k:'kgi',l:'KGI（半年目標）',badge:'KGI'},
-    {k:'kpi1',l:'KPI 1か月目',badge:'KPI'},
-    {k:'kpi3',l:'KPI 3か月目',badge:'KPI'},
-    {k:'kpi6',l:'KPI 6か月目',badge:'KPI'},
-  ];
-  area.innerHTML = card('01','KGI / KPI 設定','目標を数値で設定しましょう。コンセプト完成後でもOK',`
-    <div class="table-wrap"><table class="data-table">
-      <thead><tr><th style="width:140px">項目</th><th>概要・気持ち目標</th><th style="width:120px">数値目標</th></tr></thead>
-      <tbody>${rows.map(r=>`<tr>
-        <td>${r.badge?`<span class="badge-pink">${r.badge}</span> `:'<span class="text-sm text-muted">'}${r.l}${r.badge?'':'</span>'}</td>
-        <td><input value="${getField(r.k+'_text')}" placeholder="気持ち・方向性" oninput="sf('${r.k}_text',this.value)"></td>
-        <td><input value="${getField(r.k+'_num')}" placeholder="数値目標" oninput="sf('${r.k}_num',this.value)"></td>
-      </tr>`).join('')}</tbody>
-    </table></div>`);
-}
-
-function renderStrengths(area) {
-  area.innerHTML = card('02','自分の強み分析','あなたにしかできないことを探しましょう',`
-    <div class="field"><div class="field-label">強みリスト <span class="field-eg">一行ずつ書き出す</span></div>
-    <textarea rows="5" placeholder="・◯◯に住んでいる&#10;・◯◯の動画編集が得意&#10;・◯◯に行ける環境がある" oninput="sf('strengths_list',this.value)">${getField('strengths_list')}</textarea></div>
-    <div class="field"><div class="field-label">強みまとめ（一文で）</div>
-    <input type="text" value="${getField('strengths_summary')}" placeholder="例：奈良在住で独自の世界観を持つトラベルクリエイター" oninput="sf('strengths_summary',this.value)"></div>`);
-}
-
-function renderTextSec(area,secId,num,title,hint,field,placeholder) {
-  area.innerHTML = card(num,title,hint,`
-    <div class="field"><textarea rows="8" placeholder="${placeholder}" oninput="sf('${field}',this.value)">${getField(field)}</textarea></div>`);
-}
-
-function renderPersona(area) {
-  const flds=[['persona_gender','性別','男性 / 女性'],['persona_age','年齢','例：30代前半'],['persona_area','地域','例：大阪市内'],['persona_job','学生・仕事','例：フルタイム会社員'],['persona_income','年収','例：400万円'],['persona_married','既婚・未婚','例：未婚'],['persona_kids','子供の有無','例：なし'],['persona_hobby','趣味','例：旅行・カフェ巡り'],['persona_worry','悩み','例：インスタが伸びない']];
-  area.innerHTML = card('05','ペルソナ設定','一人の人間を具体的にイメージして埋めましょう',`
-    <div class="field-grid">${flds.map(([k,l,p])=>`<div class="field"><div class="field-label">${l}</div><input type="text" value="${getField(k)}" placeholder="${p}" oninput="sf('${k}',this.value)"></div>`).join('')}</div>
-    <div class="field" style="margin-top:12px"><div class="field-label">ペルソナまとめ（一文で）</div>
-    <textarea rows="3" placeholder="例：大阪在住27歳会社員女性。週末だけ旅行。インスタで旅先を探している。節約しながら映える旅をしたい。" oninput="sf('persona_summary',this.value)">${getField('persona_summary')}</textarea></div>`);
-}
-
-function renderRivals(area) {
-  let rivals=[]; try{rivals=JSON.parse(getField('rivals')||'[]');}catch(e){}
-  if(!rivals.length) rivals=[{name:'',url:'',followers:'',strength:''}];
-  area.innerHTML = card('07','競合リサーチ','同ジャンルで伸びているアカウントを調査しましょう',`
-    <div class="table-wrap"><table class="data-table">
-      <thead><tr><th>アカウント名</th><th>URL</th><th style="width:70px">フォロワー</th><th>特徴・強み</th></tr></thead>
-      <tbody id="rivals-body">${rivals.map((r,i)=>rivalRow(r,i)).join('')}</tbody>
-    </table></div>
-    <button class="add-row-btn" onclick="addRivalRow()"><i class="ti ti-plus"></i> 行を追加</button>`);
-}
-function rivalRow(r,i){return `<tr><td><input value="${r.name||''}" placeholder="@account" oninput="saveRival(${i},'name',this.value)"></td><td><input value="${r.url||''}" placeholder="https://..." oninput="saveRival(${i},'url',this.value)"></td><td><input value="${r.followers||''}" placeholder="1.2万" oninput="saveRival(${i},'followers',this.value)"></td><td><input value="${r.strength||''}" placeholder="特徴" oninput="saveRival(${i},'strength',this.value)"></td></tr>`;}
-window.addRivalRow=()=>{let r=[];try{r=JSON.parse(getField('rivals')||'[]');}catch(e){}r.push({});sf('rivals',JSON.stringify(r));const b=document.getElementById('rivals-body');if(b)b.insertAdjacentHTML('beforeend',rivalRow({},r.length-1));};
-window.saveRival=(i,k,v)=>{let r=[];try{r=JSON.parse(getField('rivals')||'[]');}catch(e){}if(!r[i])r[i]={};r[i][k]=v;sf('rivals',JSON.stringify(r));};
-
-function renderTopPosts(area) {
-  let posts=[]; try{posts=JSON.parse(getField('top_posts')||'[]');}catch(e){}
-  if(!posts.length) posts=[{account:'',followers:'',title:'',url:'',reason:''}];
-  area.innerHTML = card('08','伸び投稿リサーチ','競合の最も伸びている投稿を分析しましょう',`
-    <div class="table-wrap"><table class="data-table">
-      <thead><tr><th>アカウント</th><th style="width:60px">フォロワー</th><th>投稿タイトル</th><th>URL</th><th>なぜ伸びたか</th></tr></thead>
-      <tbody id="posts-body">${posts.map((p,i)=>postRow(p,i)).join('')}</tbody>
-    </table></div>
-    <button class="add-row-btn" onclick="addPostRow()"><i class="ti ti-plus"></i> 行を追加</button>`);
-}
-function postRow(p,i){return `<tr><td><input value="${p.account||''}" placeholder="@account" oninput="savePost(${i},'account',this.value)"></td><td><input value="${p.followers||''}" placeholder="1万" oninput="savePost(${i},'followers',this.value)"></td><td><input value="${p.title||''}" placeholder="タイトル" oninput="savePost(${i},'title',this.value)"></td><td><input value="${p.url||''}" placeholder="URL" oninput="savePost(${i},'url',this.value)"></td><td><input value="${p.reason||''}" placeholder="理由" oninput="savePost(${i},'reason',this.value)"></td></tr>`;}
-window.addPostRow=()=>{let p=[];try{p=JSON.parse(getField('top_posts')||'[]');}catch(e){}p.push({});sf('top_posts',JSON.stringify(p));const b=document.getElementById('posts-body');if(b)b.insertAdjacentHTML('beforeend',postRow({},p.length-1));};
-window.savePost=(i,k,v)=>{let p=[];try{p=JSON.parse(getField('top_posts')||'[]');}catch(e){}if(!p[i])p[i]={};p[i][k]=v;sf('top_posts',JSON.stringify(p));};
-
-function renderTheme(area) {
-  const qs=[['theme_gap','競合の空白ポジションは？','例：奈良特化の絶景動画クリエイターがいない'],['theme_trend','伸びる投稿の傾向は？','例：日本の音楽に合わせた没入感ある絶景リール'],['theme_continue','自分が続けられそうなテーマは？','例：関西の絶景スポット紹介'],['theme_enjoy','自分が楽しめるテーマは？','例：旅行・撮影・動画編集'],['theme','あなたの独自テーマ（まとめ）','例：奈良特化の「思わず行きたくなる」絶景スポット紹介']];
-  area.innerHTML = card('09','独自テーマ発掘','4つの質問に答えて、あなただけのテーマを見つけましょう',
-    qs.map(([k,l,p])=>`<div class="field"><div class="field-label">${l}</div><input type="text" value="${getField(k)}" placeholder="${p}" oninput="sf('${k}',this.value)"></div>`).join(''));
-}
-
-function renderConceptFinal(area) {
-  const draft=getField('concept_draft');
-  const theme=getField('theme');
-  const saved=getField('concept_final');
-  const approved=getField('concept_ok');
-  const hasSrc=draft||theme;
-  area.innerHTML = card('10','正式コンセプト設計','06の仮コンセプト × 09の独自テーマを掛け合わせて、あなただけの正式コンセプトを完成させましょう',`
-    ${hasSrc?`<div class="src-grid">
-      <div class="src-box"><div class="src-label">06. 仮コンセプト</div><div class="src-text">${draft||'<span class="text-muted">未入力</span>'}</div></div>
-      <div class="src-box"><div class="src-label">09. 独自テーマ</div><div class="src-text">${theme||'<span class="text-muted">未入力</span>'}</div></div>
-    </div>`:`<div class="alert-warn"><i class="ti ti-info-circle"></i> 先に06（仮コンセプト）と09（独自テーマ）を入力してください。</div>`}
-    <div class="field"><div class="field-label" style="color:#E1306C;font-weight:600">✦ 正式コンセプト（確定版）</div>
-    <textarea id="concept-final-input" rows="5" placeholder="入力してください" oninput="sf('concept_final',this.value)">${saved}</textarea></div>
-    ${approved?`<div class="alert-ok"><i class="ti ti-circle-check"></i> コンセプト確定済み — 運用の軸として大切にしましょう</div>`:''}
-    <div style="display:flex;gap:8px;margin-top:8px">
-      <button onclick="approveConcept()" class="btn-approve"><i class="ti ti-check"></i> OK — これで決定</button>
-      <button onclick="resetApproval()" class="btn-ghost-sm"><i class="ti ti-edit"></i> 修正</button>
-    </div>`);
-}
-window.approveConcept=()=>{sf('concept_ok','1');renderContent();};
-window.resetApproval=()=>{sf('concept_ok','');renderContent();};
-
-function renderCheckSec(area,secId,num,title,checks,candidateF,finalF,finalLabel,isTA=false) {
-  const cand=isTA?`<textarea rows="4" placeholder="候補を入力" oninput="sf('${candidateF}',this.value)">${getField(candidateF)}</textarea>`:`<input type="text" value="${getField(candidateF)}" placeholder="候補を入力" oninput="sf('${candidateF}',this.value)">`;
-  const final=isTA?`<textarea rows="4" placeholder="確定版を入力" oninput="sf('${finalF}',this.value)">${getField(finalF)}</textarea>`:`<input type="text" value="${getField(finalF)}" placeholder="確定版を入力" oninput="sf('${finalF}',this.value)">`;
-  area.innerHTML = card(num,title,'',`
-    <div class="field"><div class="field-label">候補</div>${cand}</div>
-    <div class="field"><div class="field-label">チェックリスト</div>
-    <div class="checklist">${checks.map((c,i)=>{const chk=getCheckState(secId,i);return`<label class="check-item${chk?' checked':''}"><input type="checkbox"${chk?' checked':''} onchange="toggleCheck('${secId}',${i},this.checked,this.closest('.check-item'))"><span>${c}</span>${chk?'<span class="check-mark">✓</span>':''}</label>`;}).join('')}</div></div>
-    <div class="field"><div class="field-label" style="color:#E1306C">✦ ${finalLabel}</div>${final}</div>`);
-}
-window.toggleCheck=(sec,i,v,el)=>{setCheckState(sec,i,v);el.classList.toggle('checked',v);const m=el.querySelector('.check-mark');if(v&&!m)el.insertAdjacentHTML('beforeend','<span class="check-mark">✓</span>');else if(!v&&m)m.remove();};
-
-function renderIconSec(area) {
-  const icon=getField('icon');
-  const checks=['アイコンを見てどんな投稿か分かるか','他に埋もれないデザインか','ターゲットにウケるデザインか','投稿内容に合う世界観か'];
-  area.innerHTML = card('A3','アイコン設定','プロフィールの第一印象を決める大切な要素です',`
-    <div class="field">
-      <div class="icon-upload-wrap">
-        <div class="icon-preview">${icon?`<img src="${icon}" alt="icon">`:'<i class="ti ti-user" style="font-size:28px;color:#a09a93"></i>'}</div>
-        <div>
-          <label class="upload-label" for="icon-file"><i class="ti ti-upload"></i> 画像をアップロード</label>
-          <input type="file" id="icon-file" accept="image/*" onchange="uploadIcon(this)" style="display:none">
-          <p style="font-size:11px;color:#a09a93;margin-top:6px">JPG・PNG対応（2MB以下推奨）</p>
-          ${icon?`<button onclick="sf('icon','')" style="margin-top:6px;font-size:11px;color:#a09a93;background:none;border:none;cursor:pointer"><i class="ti ti-trash"></i> 削除</button>`:''}
-        </div>
-      </div>
-    </div>
-    <div class="field"><div class="field-label">チェックリスト</div>
-    <div class="checklist">${checks.map((c,i)=>{const chk=getCheckState('a3',i);return`<label class="check-item${chk?' checked':''}"><input type="checkbox"${chk?' checked':''} onchange="toggleCheck('a3',${i},this.checked,this.closest('.check-item'))"><span>${c}</span>${chk?'<span class="check-mark">✓</span>':''}</label>`;}).join('')}</div></div>`);
-}
-window.uploadIcon=(input)=>{
-  const file=input.files[0];if(!file)return;
-  const reader=new FileReader();
-  reader.onload=e=>{sf('icon',e.target.result);renderContent();};
-  reader.readAsDataURL(file);
-};
-
-function renderReelSec(area) {
-  const checks=['冒頭1秒で引き込む構成になっているか','音源と映像がマッチしているか','ペルソナの悩みを解決できるコンテンツか','保存されやすい情報が入っているか','最後に明確なアクション誘導があるか'];
-  area.innerHTML = card('A5','投稿・リール設計','チェックリストで投稿のクオリティを確認しましょう',`
-    <div class="field"><div class="field-label">投稿コンセプト・アイデア</div>
-    <textarea rows="5" placeholder="どんな投稿をするか記入してください" oninput="sf('reel_concept',this.value)">${getField('reel_concept')}</textarea></div>
-    <div class="field"><div class="field-label">チェックリスト</div>
-    <div class="checklist">${checks.map((c,i)=>{const chk=getCheckState('a5',i);return`<label class="check-item${chk?' checked':''}"><input type="checkbox"${chk?' checked':''} onchange="toggleCheck('a5',${i},this.checked,this.closest('.check-item'))"><span>${c}</span>${chk?'<span class="check-mark">✓</span>':''}</label>`;}).join('')}</div></div>`);
-}
-
-function renderIG(area) {
-  const icon=getField('icon');
-  const name=getField('accname_final')||currentUser.displayName||'アカウント名';
-  const username=getField('username_final')||'username';
-  const bio=getField('profile_final')||'プロフィールを入力してください';
-  const concept=getField('concept_final');
-  const persona=getField('persona_summary');
-  const igPhotos = [
-    'https://images.unsplash.com/photo-1490806843957-31f4c9a91c65?w=300&q=80',
-    'https://images.unsplash.com/photo-1528360983277-13d401cdc186?w=300&q=80',
-    'https://images.unsplash.com/photo-1504109586057-7a2ae83d1338?w=300&q=80',
-    'https://images.unsplash.com/photo-1540959733332-eab4deabeeaf?w=300&q=80',
-    'https://images.unsplash.com/photo-1493976040374-85c8e12f0c0e?w=300&q=80',
-    'https://images.unsplash.com/photo-1526481280693-3bfa7568e0f3?w=300&q=80',
-    'https://images.unsplash.com/photo-1545569341-9eb8b30979d9?w=300&q=80',
-    'https://images.unsplash.com/photo-1516663713099-efd8cadb6e92?w=300&q=80',
-    'https://images.unsplash.com/photo-1467269204594-9661b134dd2b?w=300&q=80',
-  ];
-  area.innerHTML = `<div class="ig-wrap">
-    <div class="ig-card">
-      <div class="ig-top">
-        <div class="ig-row">
-          <div class="ig-avatar"><div class="ig-av-inner">${icon?`<img src="${icon}" alt="icon">`:'<i class="ti ti-user" style="font-size:24px;color:#a09a93"></i>'}</div></div>
-          <div class="ig-stats">
-            <div class="ig-stat"><span class="ig-stat-n">0</span><span class="ig-stat-l">投稿</span></div>
-            <div class="ig-stat"><span class="ig-stat-n">0</span><span class="ig-stat-l">フォロワー</span></div>
-            <div class="ig-stat"><span class="ig-stat-n">0</span><span class="ig-stat-l">フォロー中</span></div>
-          </div>
-        </div>
-        <div class="ig-username">@${username}</div>
-        <div class="ig-name">${name}</div>
-        <div class="ig-bio">${bio}</div>
-        ${concept?`<div class="ig-tag"><div class="ig-tag-label">コンセプト</div>${concept}</div>`:''}
-        ${persona?`<div class="ig-tag"><div class="ig-tag-label">ターゲット</div>${persona}</div>`:''}
-      </div>
-      <div class="ig-actions">
-        <div class="ig-btn ig-btn-follow">フォローする</div>
-        <div class="ig-btn">メッセージ</div>
-      </div>
-      <div class="ig-divider"></div>
-      <div class="ig-grid">${igPhotos.map(url=>`<div class="ig-cell"><img src="${url}" alt="post" loading="lazy"></div>`).join('')}</div>
-    </div>
-  </div>`;
-}
-
-// ── Admin ──
-function renderAdmin(area) {
-  if (!allUsers.length) {
-    area.innerHTML = `<div class="empty-state"><i class="ti ti-users"></i><p>まだユーザーが登録されていません</p></div>`;
-    return;
-  }
-  const cards = allUsers.map(u => {
-    const {pct,filled,total} = calcProgressForUser(u);
-    const av = u.photoURL ? `<img src="${u.photoURL}" alt="${u.name}">` : `<span>${(u.name||'?').charAt(0)}</span>`;
-    return `<div class="admin-card" onclick="viewUserAdmin('${u.uid}')">
-      <div class="admin-card-top"><div class="admin-av">${av}</div>
-      <div><div class="admin-name">${u.name||u.email}</div><div class="admin-email">${u.email||''}</div></div></div>
-      <div class="admin-prog"><div class="admin-fill" style="width:${pct}%"></div></div>
-      <div class="admin-pct">${pct}% 完了（${filled}/${total}項目）</div>
-    </div>`;
-  }).join('');
-  area.innerHTML = `
-    <div class="admin-header"><div class="admin-title">管理者ビュー</div>
-    <div class="admin-sub">ユーザーをクリックして入力内容を確認できます（${allUsers.length}人）</div></div>
-    <div class="admin-grid">${cards}</div>`;
-}
-
-window.viewUserAdmin = async (uid) => {
-  const snap = await getDoc(doc(db, 'users', uid));
-  const data = snap.exists() ? snap.data() : {};
-  userData = data;
-  viewingUid = uid;
-  currentSec = 'ig';
-  mode = 'user';
-  renderApp();
-};
-
-// ── Present ──
-function renderPresent(area) {
-  const allS = [...ALL_SECTIONS, SEC_IG];
-  const sec = allS[presentIdx] || allS[0];
-  area.innerHTML = `<div class="present-bar">
-    <div class="present-label"><i class="ti ti-presentation"></i> 発表モード — ${currentUser.displayName}</div>
-    <div class="present-nav">
-      <button class="nav-btn" onclick="presNav(-1)" ${presentIdx===0?'disabled':''}><i class="ti ti-chevron-left"></i> 前へ</button>
-      <span class="present-sec-name">${sec.num}. ${sec.label}</span>
-      <span class="present-counter">${presentIdx+1} / ${allS.length}</span>
-      <button class="nav-btn" onclick="presNav(1)" ${presentIdx===allS.length-1?'disabled':''}>次へ <i class="ti ti-chevron-right"></i></button>
-    </div>
-  </div>
-  <div id="present-body" class="present-body"></div>`;
-  renderPresentContent(sec.id);
-}
-
-function renderPresentContent(secId) {
-  const body = document.getElementById('present-body');
-  if (!body) return;
-  body.innerHTML = '';
-  currentSec = secId;
-  switch(secId) {
-    case 's01': renderKGI(body); break;
-    case 's02': renderStrengths(body); break;
-    case 's03': renderTextSec(body,'s03','03','インスタニーズマップ','インスタユーザーが求めているものを書き出しましょう','needs','・行った気になれる体験\n・絶景・穴場スポット情報\n・真似できる編集テクニック\n・旅行計画のヒント'); break;
-    case 's04': renderTextSec(body,'s04','04','自分の強み × ニーズ','強みとニーズを掛け合わせてポジションを見つけましょう','cross','例）大阪在住 × 関西穴場情報ニーズ → 関西特化の絶景スポット紹介'); break;
-    case 's05': renderPersona(body); break;
-    case 's06': renderTextSec(body,'s06','06','仮コンセプト設計','強み × ニーズ × ペルソナを一文にまとめましょう','concept_draft','例）週末だけ旅する20代女性のために、関西の映える穴場スポットをショート動画で届けるクリエイター'); break;
-    case 's07': renderRivals(body); break;
-    case 's08': renderTopPosts(body); break;
-    case 's09': renderTheme(body); break;
-    case 's10': renderConceptFinal(body); break;
-    case 'a1': renderCheckSec(body,'a1','A1','ユーザーネーム設定',['ジャンルのキーワードが入っているか','短くて覚えやすいか','他のアカウントと被っていないか','長く使い続けられるか'],'username_candidate','username_final','確定ユーザーネーム'); break;
-    case 'a2': renderCheckSec(body,'a2','A2','アカウント名設定',['検索されうるキーワードが入っているか','名前も入っているか','キーワードと名前の順番が正しいか','GoogleのSEOを意識できているか'],'accname_candidate','accname_final','確定アカウント名'); break;
-    case 'a3': renderIconSec(body); break;
-    case 'a4': renderCheckSec(body,'a4','A4','プロフィール設計',['箇条書きになっているか','投稿しているジャンルが明記されているか','中学生でも分かりやすいか','フォローするメリットが伝わるか','このアカウントの説明になっているか'],'profile_candidate','profile_final','確定プロフィール',true); break;
-    case 'a5': renderReelSec(body); break;
-    case 'ig': renderIG(body); break;
-  }
-  // 発表モードは全入力要素を読み取り専用に
-  body.querySelectorAll('input, textarea').forEach(el => {
-    el.setAttribute('readonly', true);
-    el.style.cursor = 'default';
-    el.style.background = 'transparent';
-  });
-  body.querySelectorAll('button:not(.nav-btn)').forEach(el => {
-    el.style.display = 'none';
-  });
-  body.querySelectorAll('.add-row-btn').forEach(el => el.style.display = 'none');
-  body.querySelectorAll('input[type=checkbox]').forEach(el => el.setAttribute('disabled', true));
-  body.querySelectorAll('input[type=file]').forEach(el => el.setAttribute('disabled', true));
-  body.querySelectorAll('.upload-label').forEach(el => el.style.display = 'none');
-}
-
-window.presNav=(d)=>{
-  const allS=[...ALL_SECTIONS,SEC_IG];
-  presentIdx=Math.max(0,Math.min(allS.length-1,presentIdx+d));
-  const area = document.getElementById('main-content');
-  if(area) renderPresent(area);
-};
-
-window.sf = sf;
-window.approveConcept = window.approveConcept;
-</script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:'DM Sans',sans-serif;background:#f5f4f2;color:#1a1816;font-size:14px;min-height:100vh}
 #app{min-height:100vh}
-
-/* Shell */
 .app-shell{display:flex;flex-direction:column;min-height:100vh}
 
-/* Header */
-.top-header{background:#0d1b2a;padding:0 16px;height:56px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-shrink:0;position:sticky;top:0;z-index:100}
+/* ── Header ── */
+.top-header{background:#0d1b2a;padding:0 16px;height:56px;display:flex;align-items:center;justify-content:space-between;gap:8px;flex-shrink:0;position:sticky;top:0;z-index:200}
 .header-left{display:flex;align-items:baseline;gap:8px;flex-shrink:0}
-.logo{font-size:16px;font-weight:600;color:#fff;letter-spacing:-.3px}
+.logo{font-size:16px;font-weight:600;color:#fff;letter-spacing:-.3px;white-space:nowrap}
 .logo span{color:#ff6b9d}
 .logo-sub{font-size:10px;color:rgba(255,255,255,.4);font-family:'DM Mono',monospace}
 .header-center{flex:1;display:flex;justify-content:center;min-width:0}
 .header-right{display:flex;align-items:center;gap:8px;color:#fff;flex-shrink:0}
-.header-right span{font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100px}
+.user-name{font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:90px}
 .mode-tabs{display:flex;gap:2px;background:rgba(255,255,255,.1);padding:3px;border-radius:8px}
-.mode-tab{padding:5px 10px;font-size:13px;font-weight:500;border-radius:6px;border:none;background:none;color:rgba(255,255,255,.6);cursor:pointer;font-family:'DM Sans',sans-serif;display:flex;align-items:center;gap:4px;transition:all .12s;white-space:nowrap}
-.mode-tab.active{background:rgba(255,255,255,.18);color:#fff;font-weight:600}
-.mode-tab i{font-size:14px}
-.btn-ghost{background:none;border:none;color:rgba(255,255,255,.6);cursor:pointer;font-size:16px;padding:4px;border-radius:6px;flex-shrink:0}
-.btn-ghost:hover{color:#fff;background:rgba(255,255,255,.1)}
-@media(max-width:600px){
-  .logo-sub{display:none}
-  .header-right span{display:none}
-  .mode-tab{padding:5px 8px;font-size:12px}
-  .mode-tab i{display:none}
-  .top-header{padding:0 10px;gap:6px}
+.mode-tab{padding:6px 12px;font-size:13px;font-weight:500;border-radius:6px;border:none;background:none;color:rgba(255,255,255,.6);cursor:pointer;font-family:'DM Sans',sans-serif;white-space:nowrap;transition:all .12s}
+.mode-tab.active{background:rgba(255,255,255,.2);color:#fff;font-weight:600}
+.btn-ghost{background:none;border:none;color:rgba(255,255,255,.5);cursor:pointer;font-size:18px;padding:4px;border-radius:6px;flex-shrink:0;line-height:1}
+.btn-ghost:hover{color:#fff}
+.save-badge{font-size:11px;color:#4ade80;display:flex;align-items:center;gap:3px;opacity:0;transition:opacity .3s;white-space:nowrap}
+@media(max-width:520px){
+  .logo-sub,.user-name{display:none}
+  .mode-tab{padding:6px 8px;font-size:12px}
+  .top-header{gap:4px}
 }
 
-/* Section Nav */
-.sec-nav{background:#fff;border-bottom:1px solid #e8e5e0;display:flex;align-items:stretch;flex-shrink:0}
-.sec-nav-inner{display:flex;align-items:stretch;flex:1;overflow-x:auto;padding:0 8px}
-.nav-group{position:relative;display:flex;align-items:stretch}
-.nav-group-btn{padding:0 16px;font-size:15px;font-weight:600;border:none;background:none;color:#6b6560;cursor:pointer;display:flex;align-items:center;gap:6px;height:48px;border-bottom:2px solid transparent;transition:all .12s;white-space:nowrap;font-family:'DM Sans',sans-serif}
-.nav-group-btn:hover{color:#E1306C;background:#fce8f0}
-.nav-group-btn:hover i{color:#E1306C}
-.nav-group-items{display:none;position:absolute;top:100%;left:0;background:#fff;border:1px solid #e8e5e0;border-radius:10px;box-shadow:0 4px 20px rgba(0,0,0,.12);z-index:50;min-width:220px;padding:6px;flex-direction:column;gap:2px}
-.nav-group-items.open{display:flex}
-.nav-item{padding:9px 14px;font-size:15px;border:none;background:none;color:#6b6560;cursor:pointer;display:flex;align-items:center;gap:8px;border-radius:7px;transition:all .1s;font-family:'DM Sans',sans-serif;white-space:nowrap;width:100%;text-align:left}
-.nav-item:hover{background:#fce8f0;color:#E1306C}
-.nav-item:hover .nav-num{color:#E1306C}
-.nav-item.active{background:#fce8f0;color:#E1306C;font-weight:600}
-.nav-item.done .nav-done-dot{display:block}
-.nav-num{font-family:'DM Mono',monospace;font-size:11px;color:#a09a93;width:22px;flex-shrink:0}
-.nav-item.active .nav-num{color:#E1306C}
-.nav-done-dot{display:none;width:6px;height:6px;border-radius:50%;background:#0f9e7b;margin-left:auto;flex-shrink:0}
-.nav-progress{padding:12px 16px;border-left:1px solid #e8e5e0;min-width:180px;display:flex;flex-direction:column;justify-content:center}
+/* ── Section Nav ── */
+.sec-nav{background:#fff;border-bottom:1px solid #e8e5e0;display:flex;align-items:stretch;flex-shrink:0;position:relative;z-index:100}
+.sec-nav-inner{display:flex;align-items:stretch;flex:1;overflow-x:auto;padding:0 4px;gap:2px}
+.sec-nav-inner::-webkit-scrollbar{display:none}
+.nav-group{position:relative}
+.nav-group-btn{padding:0 16px;height:48px;font-size:15px;font-weight:600;border:none;background:none;color:#6b6560;cursor:pointer;display:flex;align-items:center;gap:6px;white-space:nowrap;font-family:'DM Sans',sans-serif;transition:all .12s;border-bottom:3px solid transparent}
+.nav-group-btn:hover,.nav-group-btn.open{color:#E1306C;border-bottom-color:#E1306C}
+.nav-group-btn .chevron{font-size:13px;transition:transform .2s}
+.nav-group-btn.open .chevron{transform:rotate(180deg)}
+.dropdown{display:none;position:absolute;top:calc(100% + 2px);left:0;background:#fff;border:1px solid #e8e5e0;border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.12);z-index:300;min-width:220px;padding:6px}
+.dropdown.open{display:block}
+.drop-item{width:100%;text-align:left;padding:10px 14px;font-size:14px;border:none;background:none;color:#6b6560;cursor:pointer;display:flex;align-items:center;gap:10px;border-radius:8px;font-family:'DM Sans',sans-serif;transition:all .1s;white-space:nowrap}
+.drop-item:hover{background:#fce8f0;color:#E1306C}
+.drop-item:hover .drop-num{color:#E1306C}
+.drop-item.active{background:#fce8f0;color:#E1306C;font-weight:600}
+.drop-item.active .drop-num{color:#E1306C}
+.drop-num{font-family:'DM Mono',monospace;font-size:11px;color:#a09a93;width:22px;flex-shrink:0}
+.drop-dot{width:6px;height:6px;border-radius:50%;background:#0f9e7b;margin-left:auto;flex-shrink:0;display:none}
+.drop-item.done .drop-dot{display:block}
+.ig-nav-btn{padding:0 16px;height:48px;font-size:14px;font-weight:600;border:none;background:none;color:#6b6560;cursor:pointer;display:flex;align-items:center;gap:6px;white-space:nowrap;font-family:'DM Sans',sans-serif;transition:all .12s;border-bottom:3px solid transparent}
+.ig-nav-btn:hover{color:#E1306C;border-bottom-color:#E1306C}
+.ig-nav-btn.active{color:#E1306C;border-bottom-color:#E1306C;font-weight:600}
+.nav-progress{padding:10px 14px;border-left:1px solid #e8e5e0;min-width:160px;display:flex;flex-direction:column;justify-content:center;flex-shrink:0}
+@media(max-width:600px){.nav-progress{display:none}}
 
-/* Main content */
-.main-content{flex:1;padding:24px;max-width:800px;width:100%;margin:0 auto}
+/* ── Section nav bottom (◀ ▶) ── */
+.sec-footer-nav{display:flex;justify-content:space-between;align-items:center;margin-top:16px;gap:8px}
+.sfn-btn{padding:10px 20px;font-size:14px;font-weight:600;border-radius:10px;border:none;background:#0d1b2a;color:#fff;cursor:pointer;display:flex;align-items:center;gap:6px;font-family:'DM Sans',sans-serif;transition:all .12s}
+.sfn-btn:hover{background:#1a3a5c}
+.sfn-btn:disabled{opacity:.3;cursor:default}
+.sfn-center{font-size:13px;color:#a09a93;font-family:'DM Mono',monospace}
 
-/* Form card */
-.form-card{background:#fff;border:1px solid #e8e5e0;border-radius:14px;padding:24px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
-.sec-header{display:flex;align-items:flex-start;gap:12px;margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid #e8e5e0}
+/* ── Main content ── */
+.main-content{flex:1;padding:16px;max-width:800px;width:100%;margin:0 auto}
+
+/* ── Form card ── */
+.form-card{background:#fff;border:1px solid #e8e5e0;border-radius:14px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+.sec-header{display:flex;align-items:flex-start;gap:12px;margin-bottom:20px;padding-bottom:14px;border-bottom:1px solid #e8e5e0}
 .sec-num-circle{width:36px;height:36px;border-radius:50%;background:#E1306C;color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;font-family:'DM Mono',monospace;flex-shrink:0}
 .sec-title{font-size:16px;font-weight:600}
 .sec-hint{font-size:12px;color:#6b6560;margin-top:3px;line-height:1.5}
 .field{margin-bottom:14px}
 .field-label{font-size:12px;font-weight:600;color:#6b6560;margin-bottom:5px;display:flex;align-items:center;gap:6px}
 .field-eg{font-size:10px;color:#a09a93;font-weight:400;background:#f5f4f2;padding:2px 6px;border-radius:4px}
-.field input[type=text],.field textarea{width:100%;padding:8px 10px;font-size:13px;border-radius:8px;border:1px solid #d4cfc8;background:#f5f4f2;color:#1a1816;line-height:1.6;resize:vertical;font-family:'DM Sans',sans-serif;transition:border .12s}
+.field input[type=text],.field textarea{width:100%;padding:9px 11px;font-size:14px;border-radius:8px;border:1px solid #d4cfc8;background:#f5f4f2;color:#1a1816;line-height:1.6;resize:vertical;font-family:'DM Sans',sans-serif;transition:border .12s}
 .field input:focus,.field textarea:focus{outline:none;border-color:#E1306C;background:#fff;box-shadow:0 0 0 3px rgba(225,48,108,.08)}
 .field-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+@media(max-width:480px){.field-grid{grid-template-columns:1fr}}
 
 /* Tables */
-.table-wrap{overflow-x:auto;margin-bottom:8px}
-.data-table{width:100%;border-collapse:collapse;font-size:12px}
-.data-table th{padding:7px 10px;background:#f5f4f2;font-size:11px;font-weight:600;color:#6b6560;text-align:left;border-bottom:1px solid #e8e5e0;white-space:nowrap}
+.table-wrap{overflow-x:auto;margin-bottom:8px;-webkit-overflow-scrolling:touch}
+.data-table{width:100%;border-collapse:collapse;font-size:13px}
+.data-table th{padding:8px 10px;background:#f5f4f2;font-size:11px;font-weight:600;color:#6b6560;text-align:left;border-bottom:1px solid #e8e5e0;white-space:nowrap}
 .data-table td{padding:4px 6px;border-bottom:1px solid #e8e5e0}
-.data-table input{width:100%;font-size:12px;padding:4px 6px;border:1px solid transparent;border-radius:4px;background:transparent;color:#1a1816;font-family:'DM Sans',sans-serif}
+.data-table input{width:100%;font-size:13px;padding:5px 7px;border:1px solid transparent;border-radius:5px;background:transparent;color:#1a1816;font-family:'DM Sans',sans-serif}
 .data-table input:focus{outline:none;border-color:#E1306C;background:#fff}
-.add-row-btn{font-size:11px;color:#E1306C;background:none;border:none;cursor:pointer;display:flex;align-items:center;gap:3px;padding:5px 6px;border-radius:4px;margin-top:4px}
+.add-row-btn{font-size:12px;color:#E1306C;background:none;border:none;cursor:pointer;display:flex;align-items:center;gap:3px;padding:6px;border-radius:6px;margin-top:4px}
 .add-row-btn:hover{background:#fce8f0}
 .badge-pink{display:inline-block;padding:1px 7px;border-radius:10px;font-size:10px;font-weight:600;background:#fce8f0;color:#E1306C;font-family:'DM Mono',monospace}
-.text-sm{font-size:12px}.text-muted{color:#a09a93}
+.text-muted{color:#a09a93}
 
 /* Checklist */
 .checklist{display:flex;flex-direction:column;gap:6px}
-.check-item{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;border:1px solid #e8e5e0;cursor:pointer;transition:all .12s;font-size:13px}
+.check-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;border:1px solid #e8e5e0;cursor:pointer;transition:all .12s;font-size:14px}
 .check-item:hover{background:#f5f4f2}
 .check-item.checked{background:#e6f7f2;border-color:#a0ddd0}
-.check-item input[type=checkbox]{accent-color:#0f9e7b;width:15px;height:15px;flex-shrink:0}
+.check-item input[type=checkbox]{accent-color:#0f9e7b;width:16px;height:16px;flex-shrink:0}
 .check-item span{flex:1;line-height:1.4}
-.check-mark{font-size:11px;color:#0f9e7b;font-weight:600}
+.check-mark{font-size:12px;color:#0f9e7b;font-weight:600}
 
 /* Icon upload */
 .icon-upload-wrap{display:flex;align-items:center;gap:16px}
 .icon-preview{width:80px;height:80px;border-radius:50%;border:2px solid #d4cfc8;background:#f5f4f2;overflow:hidden;display:flex;align-items:center;justify-content:center;flex-shrink:0}
 .icon-preview img{width:100%;height:100%;object-fit:cover}
-.upload-label{padding:8px 14px;font-size:12px;border-radius:8px;border:1px dashed #d4cfc8;background:none;color:#6b6560;cursor:pointer;display:flex;align-items:center;gap:6px;transition:all .12s}
+.upload-label{padding:10px 16px;font-size:13px;border-radius:8px;border:1px dashed #d4cfc8;background:none;color:#6b6560;cursor:pointer;display:flex;align-items:center;gap:6px;transition:all .12s}
 .upload-label:hover{border-color:#E1306C;color:#E1306C;background:#fce8f0}
 
 /* Concept */
 .src-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px}
 .src-box{background:#f5f4f2;border-radius:8px;padding:12px}
-.src-label{font-size:10px;font-weight:700;color:#a09a93;letter-spacing:.5px;text-transform:uppercase;margin-bottom:6px}
+.src-label{font-size:10px;font-weight:700;color:#a09a93;letter-spacing:.5px;text-transform:uppercase;margin-bottom:5px}
 .src-text{font-size:13px;line-height:1.6;color:#6b6560}
 .alert-warn{background:#fff8e8;border:1px solid #f5d76e;border-radius:8px;padding:10px 12px;font-size:12px;color:#8a6d1a;margin-bottom:14px;display:flex;align-items:center;gap:6px}
 .alert-ok{background:#e6f7f2;border:1px solid #a0ddd0;border-radius:8px;padding:10px 12px;font-size:13px;font-weight:600;color:#0f6e56;display:flex;align-items:center;gap:6px;margin-top:8px}
-.btn-approve{padding:9px 18px;font-size:13px;font-weight:600;border-radius:8px;border:none;background:#E1306C;color:#fff;cursor:pointer;font-family:'DM Sans',sans-serif;display:flex;align-items:center;gap:6px}
+.btn-approve{padding:10px 20px;font-size:13px;font-weight:600;border-radius:8px;border:none;background:#E1306C;color:#fff;cursor:pointer;font-family:'DM Sans',sans-serif;display:flex;align-items:center;gap:6px}
 .btn-approve:hover{background:#b91c57}
-.btn-ghost-sm{padding:9px 14px;font-size:12px;border-radius:8px;border:1px solid #d4cfc8;background:none;color:#6b6560;cursor:pointer;font-family:'DM Sans',sans-serif;display:flex;align-items:center;gap:5px}
-.btn-ghost-sm:hover{background:#f5f4f2}
+.btn-ghost-sm{padding:10px 14px;font-size:13px;border-radius:8px;border:1px solid #d4cfc8;background:none;color:#6b6560;cursor:pointer;font-family:'DM Sans',sans-serif;display:flex;align-items:center;gap:5px}
+@media(max-width:480px){.src-grid{grid-template-columns:1fr}}
 
 /* IG Profile */
-.ig-wrap{max-width:420px;margin:0 auto}
+.ig-wrap{max-width:440px;margin:0 auto}
 .ig-card{background:#fff;border:1px solid #e8e5e0;border-radius:14px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.06)}
 .ig-top{padding:18px 16px 12px}
 .ig-row{display:flex;align-items:center;gap:16px;margin-bottom:14px}
@@ -787,35 +149,73 @@ body{font-family:'DM Sans',sans-serif;background:#f5f4f2;color:#1a1816;font-size
 
 /* Admin */
 .admin-header{margin-bottom:16px}
-.admin-title{font-size:16px;font-weight:600;margin-bottom:4px}
-.admin-sub{font-size:12px;color:#6b6560}
-.admin-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px}
+.admin-title{font-size:17px;font-weight:600;margin-bottom:4px}
+.admin-sub{font-size:13px;color:#6b6560}
+.admin-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px}
 .admin-card{background:#fff;border:1px solid #e8e5e0;border-radius:14px;padding:14px;cursor:pointer;transition:all .15s}
 .admin-card:hover{border-color:#E1306C;transform:translateY(-1px);box-shadow:0 4px 16px rgba(225,48,108,.1)}
 .admin-card-top{display:flex;align-items:center;gap:10px;margin-bottom:10px}
-.admin-av{width:40px;height:40px;border-radius:50%;background:#f5f4f2;overflow:hidden;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:600;color:#6b6560}
+.admin-av{width:40px;height:40px;border-radius:50%;background:#f5f4f2;overflow:hidden;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:600;color:#6b6560}
 .admin-av img{width:100%;height:100%;object-fit:cover}
 .admin-name{font-size:13px;font-weight:600}
 .admin-email{font-size:11px;color:#a09a93}
-.admin-prog{height:3px;background:#f5f4f2;border-radius:2px;overflow:hidden;margin-top:8px}
+.admin-prog{height:4px;background:#f5f4f2;border-radius:2px;overflow:hidden;margin-top:8px}
 .admin-fill{height:100%;background:#E1306C;border-radius:2px}
-.admin-pct{font-size:10px;color:#a09a93;margin-top:4px}
+.admin-pct{font-size:11px;color:#a09a93;margin-top:4px}
 
-/* Present */
-.present-bar{background:#fff;border:1px solid #e8e5e0;border-radius:14px;padding:12px 16px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
-.present-label{font-size:13px;font-weight:600;color:#E1306C;display:flex;align-items:center;gap:6px}
-.present-nav{display:flex;align-items:center;gap:8px}
-.present-sec-name{font-size:14px;font-weight:600}
-.present-counter{font-size:11px;color:#a09a93;font-family:'DM Mono',monospace}
-.present-body{width:100%}
-.nav-btn{padding:6px 12px;font-size:12px;border-radius:8px;border:1px solid #d4cfc8;background:#fff;color:#1a1816;cursor:pointer;font-family:'DM Sans',sans-serif;display:flex;align-items:center;gap:4px;transition:all .12s}
-.nav-btn:hover:not(:disabled){border-color:#E1306C;color:#E1306C}
-.nav-btn:disabled{opacity:.35;cursor:default}
+/* ── Present Mode ── */
+.present-shell{position:fixed;inset:0;background:#0d1b2a;z-index:1000;display:flex;flex-direction:column;overflow:hidden}
+.present-topbar{display:flex;align-items:center;justify-content:space-between;padding:12px 20px;background:rgba(255,255,255,.05);border-bottom:1px solid rgba(255,255,255,.1);flex-shrink:0}
+.present-user{display:flex;align-items:center;gap:10px}
+.present-user img{width:32px;height:32px;border-radius:50%;object-fit:cover}
+.present-user-name{font-size:14px;font-weight:600;color:#fff}
+.present-title{font-size:13px;color:rgba(255,255,255,.5);font-family:'DM Mono',monospace}
+.present-actions{display:flex;align-items:center;gap:8px}
+.present-btn{padding:7px 14px;font-size:13px;font-weight:600;border-radius:8px;border:none;background:rgba(255,255,255,.12);color:#fff;cursor:pointer;font-family:'DM Sans',sans-serif;display:flex;align-items:center;gap:5px;transition:all .12s}
+.present-btn:hover{background:rgba(255,255,255,.2)}
+.present-btn.exit{background:#E1306C}
+.present-btn.exit:hover{background:#b91c57}
+.present-content{flex:1;overflow-y:auto;padding:24px 20px;display:flex;align-items:flex-start;justify-content:center}
+.present-content::-webkit-scrollbar{width:4px}
+.present-content::-webkit-scrollbar-thumb{background:rgba(255,255,255,.2);border-radius:2px}
+.present-bottom{display:flex;align-items:center;justify-content:space-between;padding:14px 20px;background:rgba(255,255,255,.05);border-top:1px solid rgba(255,255,255,.1);flex-shrink:0;gap:12px}
+.present-nav-btn{padding:12px 24px;font-size:15px;font-weight:600;border-radius:10px;border:none;background:#fff;color:#0d1b2a;cursor:pointer;font-family:'DM Sans',sans-serif;display:flex;align-items:center;gap:6px;transition:all .12s}
+.present-nav-btn:hover:not(:disabled){background:#fce8f0;color:#E1306C}
+.present-nav-btn:disabled{opacity:.3;cursor:default}
+.present-counter{font-size:13px;color:rgba(255,255,255,.5);font-family:'DM Mono',monospace;text-align:center}
+.present-sec-label{font-size:15px;font-weight:600;color:#fff;text-align:center}
+
+/* Present slide card */
+.slide-card{background:#fff;border-radius:20px;padding:32px;width:100%;max-width:680px;box-shadow:0 20px 60px rgba(0,0,0,.4)}
+.slide-num{display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;border-radius:50%;background:#E1306C;color:#fff;font-size:13px;font-weight:700;font-family:'DM Mono',monospace;margin-bottom:16px}
+.slide-title{font-size:22px;font-weight:700;margin-bottom:20px;color:#1a1816}
+.slide-row{margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid #f0ece8}
+.slide-row:last-child{border-bottom:none;margin-bottom:0;padding-bottom:0}
+.slide-label{font-size:11px;font-weight:700;color:#a09a93;letter-spacing:.6px;text-transform:uppercase;margin-bottom:5px}
+.slide-value{font-size:16px;color:#1a1816;line-height:1.6;white-space:pre-wrap;font-weight:500}
+.slide-value.empty{color:#d4cfc8;font-style:italic;font-weight:400;font-size:14px}
+.slide-tag{display:inline-block;padding:4px 12px;border-radius:20px;font-size:13px;font-weight:600;background:#fce8f0;color:#E1306C;margin-right:6px;margin-bottom:6px}
+.slide-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.slide-box{background:#f8f6f3;border-radius:10px;padding:14px}
+.slide-check-list{display:flex;flex-direction:column;gap:6px}
+.slide-check-item{display:flex;align-items:center;gap:8px;font-size:14px;color:#1a1816}
+.slide-check-item.done{color:#0f9e7b}
+.slide-check-item i{font-size:16px;flex-shrink:0}
+.slide-kgi-table{width:100%;border-collapse:collapse;font-size:14px}
+.slide-kgi-table th{padding:8px 12px;background:#f8f6f3;font-size:11px;font-weight:700;color:#a09a93;letter-spacing:.4px;text-transform:uppercase;text-align:left;border-bottom:1px solid #e8e5e0}
+.slide-kgi-table td{padding:10px 12px;border-bottom:1px solid #f0ece8;vertical-align:top}
+.slide-kgi-table td:first-child{font-size:11px;font-weight:700;color:#a09a93;white-space:nowrap}
+.slide-rival-item{padding:10px 14px;background:#f8f6f3;border-radius:8px;margin-bottom:6px}
+.slide-rival-name{font-size:14px;font-weight:600;margin-bottom:3px}
+.slide-rival-detail{font-size:12px;color:#6b6560}
+.slide-ig-wrap{max-width:320px;margin:0 auto}
+@media(max-width:480px){.slide-grid{grid-template-columns:1fr}.slide-card{padding:20px}.slide-title{font-size:18px}}
 
 /* Empty */
 .empty-state{text-align:center;padding:60px 20px;color:#a09a93}
 .empty-state i{font-size:48px;margin-bottom:12px;display:block}
 .empty-state p{font-size:14px}
+@keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
 </style>
 </head>
 <body>
@@ -826,6 +226,658 @@ body{font-family:'DM Sans',sans-serif;background:#f5f4f2;color:#1a1816;font-size
     </div>
   </div>
 </div>
-<style>@keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}</style>
+
+<script type="module">
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
+import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
+import { getFirestore, doc, setDoc, getDoc, collection, getDocs } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+
+const firebaseConfig = {
+  apiKey: "AIzaSyBYT9INQHIeVmVUbB6-0Qt98w1mnJRz7oA",
+  authDomain: "cre8club.firebaseapp.com",
+  projectId: "cre8club",
+  storageBucket: "cre8club.firebasestorage.app",
+  messagingSenderId: "1047210088180",
+  appId: "1:1047210088180:web:70b85b3702c7db88da30a1"
+};
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+// ── State ──
+let currentUser = null;
+let userData = {};
+let allUsers = [];
+let mode = 'user';
+let currentSec = 's01';
+let presentIdx = 0;
+let saveTimer = null;
+
+const SECTIONS_BASIC = [
+  {id:'s01',num:'01',label:'KGI / KPI 設定',fields:['purpose_text','purpose_num','kgi_text','kgi_num','kpi1_text','kpi1_num','kpi3_text','kpi3_num','kpi6_text','kpi6_num']},
+  {id:'s02',num:'02',label:'自分の強み分析',fields:['strengths_list','strengths_summary']},
+  {id:'s03',num:'03',label:'インスタニーズマップ',fields:['needs']},
+  {id:'s04',num:'04',label:'自分の強み × ニーズ',fields:['cross']},
+  {id:'s05',num:'05',label:'ペルソナ設定',fields:['persona_gender','persona_age','persona_area','persona_job','persona_income','persona_married','persona_kids','persona_hobby','persona_worry','persona_summary']},
+  {id:'s06',num:'06',label:'仮コンセプト設計',fields:['concept_draft']},
+  {id:'s07',num:'07',label:'競合リサーチ',fields:['rivals']},
+  {id:'s08',num:'08',label:'伸び投稿リサーチ',fields:['top_posts']},
+  {id:'s09',num:'09',label:'独自テーマ発掘',fields:['theme_gap','theme_trend','theme_continue','theme_enjoy','theme']},
+  {id:'s10',num:'10',label:'正式コンセプト設計',fields:['concept_final']},
+];
+const SECTIONS_APPLIED = [
+  {id:'a1',num:'A1',label:'ユーザーネーム設定',fields:['username_candidate','username_final']},
+  {id:'a2',num:'A2',label:'アカウント名設定',fields:['accname_candidate','accname_final']},
+  {id:'a3',num:'A3',label:'アイコン設定',fields:['icon']},
+  {id:'a4',num:'A4',label:'プロフィール設計',fields:['profile_candidate','profile_final']},
+  {id:'a5',num:'A5',label:'投稿・リール設計',fields:['reel_concept']},
+];
+const SEC_IG = {id:'ig',num:'★',label:'Your Account Information',fields:[]};
+const ALL_SECTIONS = [...SECTIONS_BASIC,...SECTIONS_APPLIED];
+const ALL_WITH_IG = [...ALL_SECTIONS, SEC_IG];
+
+// ── Firestore helpers ──
+function gf(f){ return userData[f]||''; }
+function sf(f,v){ userData[f]=v; scheduleSave(); renderNavState(); renderProgress(); }
+function scheduleSave(){
+  clearTimeout(saveTimer);
+  saveTimer=setTimeout(async()=>{
+    try{ await setDoc(doc(db,'users',currentUser.uid),userData,{merge:true}); showSaved(); }catch(e){ console.error(e); }
+  },800);
+}
+function showSaved(){ const el=document.getElementById('save-badge'); if(el){el.style.opacity='1';setTimeout(()=>{if(el)el.style.opacity='0';},2000);} }
+function getCheck(s,i){ try{return(userData[`chk_${s}`]||{})[i]||false;}catch(e){return false;} }
+function setCheck(s,i,v){ const k=`chk_${s}`; if(!userData[k])userData[k]={}; userData[k][i]=v; scheduleSave(); }
+function calcPct(d){
+  const total=ALL_SECTIONS.reduce((n,s)=>n+(s.fields?s.fields.length:0),0);
+  const filled=ALL_SECTIONS.reduce((n,s)=>{ if(!s.fields)return n; return n+s.fields.filter(f=>(d||userData)[f]).length; },0);
+  return {total,filled,pct:total?Math.round(filled/total*100):0};
+}
+
+// ── Auth ──
+window._login = async()=>{ try{ await signInWithPopup(auth,new GoogleAuthProvider()); }catch(e){ console.error(e); } };
+window._logout = async()=>{ await signOut(auth); currentUser=null; userData={}; allUsers=[]; renderLogin(); };
+
+onAuthStateChanged(auth, async user=>{
+  if(user){
+    currentUser=user;
+    const snap=await getDoc(doc(db,'users',user.uid));
+    if(snap.exists()) userData=snap.data();
+    else{ userData={name:user.displayName,email:user.email,photoURL:user.photoURL}; await setDoc(doc(db,'users',user.uid),userData); }
+    const asnap=await getDocs(collection(db,'users'));
+    allUsers=[]; asnap.forEach(d=>allUsers.push({uid:d.id,...d.data()}));
+    renderApp();
+  } else { renderLogin(); }
+});
+
+// ── Login ──
+function renderLogin(){
+  document.getElementById('app').innerHTML=`
+  <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0d1b2a">
+    <div style="background:#fff;border-radius:20px;padding:48px 36px;width:340px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.35)">
+      <div style="font-size:24px;font-weight:600;margin-bottom:6px">Creator <span style="color:#E1306C">Textbook</span></div>
+      <div style="font-size:11px;color:#a09a93;font-family:'DM Mono',monospace;margin-bottom:28px">by Cre8Club</div>
+      <p style="font-size:14px;color:#6b6560;line-height:1.7;margin-bottom:28px">インスタグラム運用講座の<br>ワークブックアプリです</p>
+      <button id="login-btn" style="width:100%;padding:14px;font-size:14px;font-weight:600;border-radius:12px;border:1.5px solid #e8e5e0;background:#fff;color:#1a1816;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px;font-family:'DM Sans',sans-serif">
+        <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M16.51 8H8.98v3h4.3c-.18 1-.74 1.48-1.6 2.04v2.01h2.6a7.8 7.8 0 0 0 2.38-5.88c0-.57-.05-.66-.15-1.18z"/><path fill="#34A853" d="M8.98 17c2.16 0 3.97-.72 5.3-1.94l-2.6-2.04a4.8 4.8 0 0 1-7.18-2.54H1.83v2.07A8 8 0 0 0 8.98 17z"/><path fill="#FBBC05" d="M4.5 10.52a4.8 4.8 0 0 1 0-3.04V5.41H1.83a8 8 0 0 0 0 7.18l2.67-2.07z"/><path fill="#EA4335" d="M8.98 4.18c1.17 0 2.23.4 3.06 1.2l2.3-2.3A8 8 0 0 0 1.83 5.4L4.5 7.49a4.77 4.77 0 0 1 4.48-3.3z"/></svg>
+        Googleアカウントでログイン
+      </button>
+      <p style="margin-top:14px;font-size:11px;color:#a09a93">Cre8Clubのメンバーのみ利用できます</p>
+    </div>
+  </div>`;
+  document.getElementById('login-btn').addEventListener('click', window._login);
+}
+
+// ── App shell ──
+function renderApp(){
+  const {pct,filled,total}=calcPct();
+  document.getElementById('app').innerHTML=`
+  <div class="app-shell" id="app-shell">
+    <header class="top-header">
+      <div class="header-left">
+        <div class="logo">Creator <span>Textbook</span></div>
+        <div class="logo-sub">by Cre8Club</div>
+      </div>
+      <div class="header-center">
+        <div class="mode-tabs" id="mode-tabs">
+          <button class="mode-tab ${mode==='user'?'active':''}" data-mode="user">ワークブック</button>
+          <button class="mode-tab ${mode==='admin'?'active':''}" data-mode="admin">管理者</button>
+          <button class="mode-tab ${mode==='present'?'active':''}" data-mode="present">発表</button>
+        </div>
+      </div>
+      <div class="header-right">
+        <span class="save-badge" id="save-badge"><i class="ti ti-check"></i> 保存済み</span>
+        <img src="${currentUser.photoURL||''}" style="width:30px;height:30px;border-radius:50%;object-fit:cover" alt="">
+        <span class="user-name">${currentUser.displayName||''}</span>
+        <button class="btn-ghost" id="logout-btn" title="ログアウト"><i class="ti ti-logout"></i></button>
+      </div>
+    </header>
+    <nav class="sec-nav" id="sec-nav" style="${mode!=='user'?'display:none':''}">
+      <div class="sec-nav-inner">
+        <div class="nav-group" id="ng-basic">
+          <button class="nav-group-btn" id="ngb-basic">基本編 <i class="ti ti-chevron-down chevron"></i></button>
+          <div class="dropdown" id="dd-basic">${SECTIONS_BASIC.map(s=>{
+            const done=s.fields&&s.fields.some(f=>gf(f));
+            return `<button class="drop-item${s.id===currentSec?' active':''}${done?' done':''}" data-sec="${s.id}"><span class="drop-num">${s.num}</span>${s.label}<span class="drop-dot"></span></button>`;
+          }).join('')}</div>
+        </div>
+        <div class="nav-group" id="ng-applied">
+          <button class="nav-group-btn" id="ngb-applied">応用編 <i class="ti ti-chevron-down chevron"></i></button>
+          <div class="dropdown" id="dd-applied">${SECTIONS_APPLIED.map(s=>{
+            const done=s.fields&&s.fields.some(f=>gf(f));
+            return `<button class="drop-item${s.id===currentSec?' active':''}${done?' done':''}" data-sec="${s.id}"><span class="drop-num">${s.num}</span>${s.label}<span class="drop-dot"></span></button>`;
+          }).join('')}</div>
+        </div>
+        <button class="ig-nav-btn${currentSec==='ig'?' active':''}" data-sec="ig">★ IGプロフィール</button>
+      </div>
+      <div class="nav-progress">
+        <div id="prog-label" style="display:flex;justify-content:space-between;font-size:11px;color:#6b6560;margin-bottom:4px"><span>入力進捗</span><span>${pct}%（${filled}/${total}）</span></div>
+        <div style="height:4px;background:#e8e5e0;border-radius:2px;overflow:hidden"><div id="prog-fill" style="height:100%;background:#E1306C;border-radius:2px;width:${pct}%;transition:width .4s"></div></div>
+      </div>
+    </nav>
+    <main class="main-content" id="main-content"></main>
+  </div>`;
+
+  // イベント登録（onclick属性ではなくJSで）
+  document.getElementById('logout-btn').addEventListener('click', window._logout);
+
+  // モードタブ
+  document.querySelectorAll('.mode-tab').forEach(btn=>{
+    btn.addEventListener('click',()=>{ mode=btn.dataset.mode; if(mode==='present')presentIdx=0; renderApp(); });
+  });
+
+  // プルダウン（JSでイベント登録）
+  ['basic','applied'].forEach(id=>{
+    const btn=document.getElementById(`ngb-${id}`);
+    const dd=document.getElementById(`dd-${id}`);
+    if(!btn||!dd) return;
+    btn.addEventListener('click',(e)=>{
+      e.stopPropagation();
+      const isOpen=dd.classList.contains('open');
+      // 全部閉じる
+      document.querySelectorAll('.dropdown').forEach(d=>d.classList.remove('open'));
+      document.querySelectorAll('.nav-group-btn').forEach(b=>b.classList.remove('open'));
+      if(!isOpen){ dd.classList.add('open'); btn.classList.add('open'); }
+    });
+  });
+
+  // ドロップダウン内のセクションボタン
+  document.querySelectorAll('.drop-item').forEach(btn=>{
+    btn.addEventListener('click',()=>{
+      currentSec=btn.dataset.sec;
+      document.querySelectorAll('.dropdown').forEach(d=>d.classList.remove('open'));
+      document.querySelectorAll('.nav-group-btn').forEach(b=>b.classList.remove('open'));
+      renderApp();
+    });
+  });
+
+  // IGナビボタン
+  const igBtn=document.querySelector('.ig-nav-btn');
+  if(igBtn) igBtn.addEventListener('click',()=>{ currentSec='ig'; renderApp(); });
+
+  // 外クリックで閉じる
+  document.addEventListener('click',()=>{
+    document.querySelectorAll('.dropdown').forEach(d=>d.classList.remove('open'));
+    document.querySelectorAll('.nav-group-btn').forEach(b=>b.classList.remove('open'));
+  },{capture:false});
+
+  renderContent();
+}
+
+function renderNavState(){
+  // ナビのactive/done状態だけ更新
+  document.querySelectorAll('.drop-item').forEach(btn=>{
+    const s=ALL_SECTIONS.find(x=>x.id===btn.dataset.sec);
+    btn.classList.toggle('active',btn.dataset.sec===currentSec);
+    btn.classList.toggle('done',s&&s.fields&&s.fields.some(f=>gf(f)));
+  });
+  const igBtn=document.querySelector('.ig-nav-btn');
+  if(igBtn) igBtn.classList.toggle('active',currentSec==='ig');
+}
+
+function renderProgress(){
+  const {pct,filled,total}=calcPct();
+  const fill=document.getElementById('prog-fill');
+  const lbl=document.getElementById('prog-label');
+  if(fill) fill.style.width=pct+'%';
+  if(lbl) lbl.innerHTML=`<span>入力進捗</span><span>${pct}%（${filled}/${total}）</span>`;
+}
+
+function renderContent(){
+  const area=document.getElementById('main-content');
+  if(!area) return;
+  if(mode==='admin'){ renderAdmin(area); return; }
+  if(mode==='present'){ renderPresentMode(); return; }
+  switch(currentSec){
+    case 's01': renderKGI(area); break;
+    case 's02': renderStrengths(area); break;
+    case 's03': renderText(area,'s03','03','インスタニーズマップ','needs','・行った気になれる体験\n・絶景・穴場スポット情報\n・真似できる編集テク\n・旅行計画のヒント'); break;
+    case 's04': renderText(area,'s04','04','自分の強み × ニーズ','cross','例）大阪在住 × 関西穴場情報ニーズ'); break;
+    case 's05': renderPersona(area); break;
+    case 's06': renderText(area,'s06','06','仮コンセプト設計','concept_draft','例）週末だけ旅する20代女性のために、関西の映える穴場スポットを届けるクリエイター'); break;
+    case 's07': renderRivals(area); break;
+    case 's08': renderPosts(area); break;
+    case 's09': renderTheme(area); break;
+    case 's10': renderConceptFinal(area); break;
+    case 'a1': renderCheck(area,'a1','A1','ユーザーネーム設定',['ジャンルのキーワードが入っているか','短くて覚えやすいか','他のアカウントと被っていないか','長く使い続けられるか'],'username_candidate','username_final','確定ユーザーネーム'); break;
+    case 'a2': renderCheck(area,'a2','A2','アカウント名設定',['検索されうるキーワードが入っているか','名前も入っているか','キーワードと名前の順番が正しいか','GoogleのSEOを意識できているか'],'accname_candidate','accname_final','確定アカウント名'); break;
+    case 'a3': renderIcon(area); break;
+    case 'a4': renderCheck(area,'a4','A4','プロフィール設計',['箇条書きになっているか','ジャンルが明記されているか','中学生でも分かりやすいか','フォローするメリットが伝わるか','このアカウントの説明になっているか'],'profile_candidate','profile_final','確定プロフィール',true); break;
+    case 'a5': renderReel(area); break;
+    case 'ig': renderIG(area); break;
+  }
+}
+
+// ── Helpers ──
+function card(num,title,hint,content){
+  const allS=ALL_WITH_IG;
+  const idx=allS.findIndex(s=>s.id===currentSec);
+  const prev=idx>0?allS[idx-1]:null;
+  const next=idx<allS.length-1?allS[idx+1]:null;
+  return `<div class="form-card">
+    <div class="sec-header">
+      <div class="sec-num-circle">${num}</div>
+      <div><div class="sec-title">${title}</div>${hint?`<div class="sec-hint">${hint}</div>`:''}</div>
+    </div>
+    ${content}
+    <div class="sec-footer-nav">
+      <button class="sfn-btn" id="sfn-prev" ${!prev?'disabled':''}><i class="ti ti-chevron-left"></i> 前へ</button>
+      <span class="sfn-center">${idx+1} / ${allS.length}</span>
+      <button class="sfn-btn" id="sfn-next" ${!next?'disabled':''}>次へ <i class="ti ti-chevron-right"></i></button>
+    </div>
+  </div>`;
+}
+
+function attachFooterNav(){
+  const prev=document.getElementById('sfn-prev');
+  const next=document.getElementById('sfn-next');
+  const allS=ALL_WITH_IG;
+  const idx=allS.findIndex(s=>s.id===currentSec);
+  if(prev&&!prev.disabled) prev.addEventListener('click',()=>{ currentSec=allS[idx-1].id; renderApp(); });
+  if(next&&!next.disabled) next.addEventListener('click',()=>{ currentSec=allS[idx+1].id; renderApp(); });
+}
+
+function renderKGI(area){
+  const rows=[{k:'purpose',l:'運用目的',b:null},{k:'kgi',l:'KGI（半年目標）',b:'KGI'},{k:'kpi1',l:'KPI 1か月目',b:'KPI'},{k:'kpi3',l:'KPI 3か月目',b:'KPI'},{k:'kpi6',l:'KPI 6か月目',b:'KPI'}];
+  area.innerHTML=card('01','KGI / KPI 設定','目標を数値で設定しましょう。コンセプト完成後でもOK',`
+    <div class="table-wrap"><table class="data-table">
+      <thead><tr><th style="width:130px">項目</th><th>概要・気持ち目標</th><th style="width:110px">数値目標</th></tr></thead>
+      <tbody>${rows.map(r=>`<tr>
+        <td>${r.b?`<span class="badge-pink">${r.b}</span> `:'<span class="text-muted" style="font-size:12px">'}${r.l}${r.b?'':'</span>'}</td>
+        <td><input id="f-${r.k}_text" value="${gf(r.k+'_text')}" placeholder="気持ち・方向性"></td>
+        <td><input id="f-${r.k}_num" value="${gf(r.k+'_num')}" placeholder="数値目標"></td>
+      </tr>`).join('')}</tbody>
+    </table></div>`);
+  rows.forEach(r=>{
+    ['text','num'].forEach(t=>{ const el=document.getElementById(`f-${r.k}_${t}`); if(el) el.addEventListener('input',()=>sf(r.k+'_'+t,el.value)); });
+  });
+  attachFooterNav();
+}
+
+function renderStrengths(area){
+  area.innerHTML=card('02','自分の強み分析','あなたにしかできないことを探しましょう',`
+    <div class="field"><div class="field-label">強みリスト <span class="field-eg">一行ずつ書き出す</span></div>
+    <textarea id="f-sl" rows="5" placeholder="・◯◯に住んでいる&#10;・◯◯の動画編集が得意&#10;・◯◯に行ける環境がある">${gf('strengths_list')}</textarea></div>
+    <div class="field"><div class="field-label">強みまとめ（一文で）</div>
+    <input type="text" id="f-ss" value="${gf('strengths_summary')}" placeholder="例：奈良在住で独自世界観を持つトラベルクリエイター"></div>`);
+  document.getElementById('f-sl').addEventListener('input',e=>sf('strengths_list',e.target.value));
+  document.getElementById('f-ss').addEventListener('input',e=>sf('strengths_summary',e.target.value));
+  attachFooterNav();
+}
+
+function renderText(area,sid,num,title,field,placeholder){
+  area.innerHTML=card(num,title,'',`<div class="field"><textarea id="f-main" rows="8" placeholder="${placeholder}">${gf(field)}</textarea></div>`);
+  document.getElementById('f-main').addEventListener('input',e=>sf(field,e.target.value));
+  attachFooterNav();
+}
+
+function renderPersona(area){
+  const flds=[['persona_gender','性別','男性 / 女性'],['persona_age','年齢','例：30代前半'],['persona_area','地域','例：大阪市内'],['persona_job','仕事','例：フルタイム会社員'],['persona_income','年収','例：400万円'],['persona_married','既婚・未婚','例：未婚'],['persona_kids','子供の有無','例：なし'],['persona_hobby','趣味','例：旅行・カフェ巡り'],['persona_worry','悩み','例：インスタが伸びない']];
+  area.innerHTML=card('05','ペルソナ設定','一人の人間を具体的にイメージして埋めましょう',`
+    <div class="field-grid">${flds.map(([k,l,p])=>`<div class="field"><div class="field-label">${l}</div><input type="text" id="f-${k}" value="${gf(k)}" placeholder="${p}"></div>`).join('')}</div>
+    <div class="field" style="margin-top:10px"><div class="field-label">ペルソナまとめ（一文で）</div>
+    <textarea id="f-ps" rows="3" placeholder="例：大阪在住27歳会社員女性。週末だけ旅行。節約しながら映える旅をしたい。">${gf('persona_summary')}</textarea></div>`);
+  flds.forEach(([k])=>{ const el=document.getElementById(`f-${k}`); if(el) el.addEventListener('input',()=>sf(k,el.value)); });
+  document.getElementById('f-ps').addEventListener('input',e=>sf('persona_summary',e.target.value));
+  attachFooterNav();
+}
+
+function renderRivals(area){
+  let rivals=[]; try{rivals=JSON.parse(gf('rivals')||'[]');}catch(e){}
+  if(!rivals.length) rivals=[{}];
+  area.innerHTML=card('07','競合リサーチ','同ジャンルで伸びているアカウントを調査しましょう',`
+    <div class="table-wrap"><table class="data-table">
+      <thead><tr><th>アカウント名</th><th>URL</th><th style="width:65px">フォロワー</th><th>特徴・強み</th></tr></thead>
+      <tbody id="rivals-body">${rivals.map((r,i)=>rivalRow(r,i)).join('')}</tbody>
+    </table></div>
+    <button class="add-row-btn" id="add-rival"><i class="ti ti-plus"></i> 行を追加</button>`);
+  document.getElementById('add-rival').addEventListener('click',()=>{
+    let r=[]; try{r=JSON.parse(gf('rivals')||'[]');}catch(e){}
+    r.push({}); sf('rivals',JSON.stringify(r));
+    document.getElementById('rivals-body').insertAdjacentHTML('beforeend',rivalRow({},r.length-1));
+    bindRivals();
+  });
+  bindRivals();
+  attachFooterNav();
+}
+function rivalRow(r,i){ return `<tr><td><input class="rv" data-i="${i}" data-k="name" value="${r.name||''}" placeholder="@account"></td><td><input class="rv" data-i="${i}" data-k="url" value="${r.url||''}" placeholder="https://..."></td><td><input class="rv" data-i="${i}" data-k="followers" value="${r.followers||''}" placeholder="1万"></td><td><input class="rv" data-i="${i}" data-k="strength" value="${r.strength||''}" placeholder="特徴"></td></tr>`; }
+function bindRivals(){ document.querySelectorAll('.rv').forEach(el=>{ el.addEventListener('input',()=>{ let r=[]; try{r=JSON.parse(gf('rivals')||'[]');}catch(e){} const i=+el.dataset.i; if(!r[i])r[i]={}; r[i][el.dataset.k]=el.value; sf('rivals',JSON.stringify(r)); }); }); }
+
+function renderPosts(area){
+  let posts=[]; try{posts=JSON.parse(gf('top_posts')||'[]');}catch(e){}
+  if(!posts.length) posts=[{}];
+  area.innerHTML=card('08','伸び投稿リサーチ','競合の最も伸びている投稿を分析しましょう',`
+    <div class="table-wrap"><table class="data-table">
+      <thead><tr><th>アカウント</th><th style="width:55px">フォロワー</th><th>投稿タイトル</th><th>URL</th><th>なぜ伸びたか</th></tr></thead>
+      <tbody id="posts-body">${posts.map((p,i)=>postRow(p,i)).join('')}</tbody>
+    </table></div>
+    <button class="add-row-btn" id="add-post"><i class="ti ti-plus"></i> 行を追加</button>`);
+  document.getElementById('add-post').addEventListener('click',()=>{
+    let p=[]; try{p=JSON.parse(gf('top_posts')||'[]');}catch(e){}
+    p.push({}); sf('top_posts',JSON.stringify(p));
+    document.getElementById('posts-body').insertAdjacentHTML('beforeend',postRow({},p.length-1));
+    bindPosts();
+  });
+  bindPosts();
+  attachFooterNav();
+}
+function postRow(p,i){ return `<tr><td><input class="pv" data-i="${i}" data-k="account" value="${p.account||''}" placeholder="@account"></td><td><input class="pv" data-i="${i}" data-k="followers" value="${p.followers||''}" placeholder="1万"></td><td><input class="pv" data-i="${i}" data-k="title" value="${p.title||''}" placeholder="タイトル"></td><td><input class="pv" data-i="${i}" data-k="url" value="${p.url||''}" placeholder="URL"></td><td><input class="pv" data-i="${i}" data-k="reason" value="${p.reason||''}" placeholder="理由"></td></tr>`; }
+function bindPosts(){ document.querySelectorAll('.pv').forEach(el=>{ el.addEventListener('input',()=>{ let p=[]; try{p=JSON.parse(gf('top_posts')||'[]');}catch(e){} const i=+el.dataset.i; if(!p[i])p[i]={}; p[i][el.dataset.k]=el.value; sf('top_posts',JSON.stringify(p)); }); }); }
+
+function renderTheme(area){
+  const qs=[['theme_gap','競合の空白ポジションは？','例：奈良特化の絶景動画クリエイターがいない'],['theme_trend','伸びる投稿の傾向は？','例：日本の音楽に合わせた没入感ある絶景リール'],['theme_continue','自分が続けられそうなテーマは？','例：関西の絶景スポット紹介'],['theme_enjoy','自分が楽しめるテーマは？','例：旅行・撮影・動画編集'],['theme','あなたの独自テーマ','例：奈良特化の「思わず行きたくなる」絶景スポット紹介']];
+  area.innerHTML=card('09','独自テーマ発掘','4つの質問に答えて、あなただけのテーマを見つけましょう',
+    qs.map(([k,l,p])=>`<div class="field"><div class="field-label">${l}</div><input type="text" id="f-${k}" value="${gf(k)}" placeholder="${p}"></div>`).join(''));
+  qs.forEach(([k])=>{ const el=document.getElementById(`f-${k}`); if(el) el.addEventListener('input',()=>sf(k,el.value)); });
+  attachFooterNav();
+}
+
+function renderConceptFinal(area){
+  const draft=gf('concept_draft'), theme=gf('theme'), saved=gf('concept_final'), ok=gf('concept_ok');
+  area.innerHTML=card('10','正式コンセプト設計','06の仮コンセプト × 09の独自テーマを掛け合わせて完成させましょう',`
+    ${draft||theme?`<div class="src-grid">
+      <div class="src-box"><div class="src-label">06. 仮コンセプト</div><div class="src-text">${draft||'<span style="color:#d4cfc8;font-style:italic">未入力</span>'}</div></div>
+      <div class="src-box"><div class="src-label">09. 独自テーマ</div><div class="src-text">${theme||'<span style="color:#d4cfc8;font-style:italic">未入力</span>'}</div></div>
+    </div>`:`<div class="alert-warn"><i class="ti ti-info-circle"></i> 先に06と09を入力してください</div>`}
+    <div class="field"><div class="field-label" style="color:#E1306C;font-weight:600">✦ 正式コンセプト（確定版）</div>
+    <textarea id="f-cf" rows="5" placeholder="入力してください">${saved}</textarea></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn-approve" id="btn-ok"><i class="ti ti-check"></i> OK — これで決定</button>
+      <button class="btn-ghost-sm" id="btn-reset"><i class="ti ti-edit"></i> 修正</button>
+    </div>
+    ${ok?`<div class="alert-ok"><i class="ti ti-circle-check"></i> コンセプト確定済み</div>`:''}`);
+  document.getElementById('f-cf').addEventListener('input',e=>sf('concept_final',e.target.value));
+  document.getElementById('btn-ok').addEventListener('click',()=>sf('concept_ok','1'));
+  document.getElementById('btn-reset').addEventListener('click',()=>sf('concept_ok',''));
+  attachFooterNav();
+}
+
+function renderCheck(area,sid,num,title,checks,candF,finalF,finalLabel,isTA=false){
+  const cand=isTA?`<textarea id="f-cand" rows="4" placeholder="候補を入力">${gf(candF)}</textarea>`:`<input type="text" id="f-cand" value="${gf(candF)}" placeholder="候補を入力">`;
+  const fin=isTA?`<textarea id="f-fin" rows="4" placeholder="確定版を入力">${gf(finalF)}</textarea>`:`<input type="text" id="f-fin" value="${gf(finalF)}" placeholder="確定版を入力">`;
+  area.innerHTML=card(num,title,'',`
+    <div class="field"><div class="field-label">候補</div>${cand}</div>
+    <div class="field"><div class="field-label">チェックリスト</div>
+    <div class="checklist">${checks.map((c,i)=>{const chk=getCheck(sid,i);return`<label class="check-item${chk?' checked':''}" id="chk-${sid}-${i}"><input type="checkbox"${chk?' checked':''} data-sec="${sid}" data-idx="${i}"><span>${c}</span>${chk?'<span class="check-mark">✓</span>':''}</label>`;}).join('')}</div></div>
+    <div class="field"><div class="field-label" style="color:#E1306C">✦ ${finalLabel}</div>${fin}</div>`);
+  document.getElementById('f-cand').addEventListener('input',e=>sf(candF,e.target.value));
+  document.getElementById('f-fin').addEventListener('input',e=>sf(finalF,e.target.value));
+  document.querySelectorAll(`[data-sec="${sid}"]`).forEach(cb=>{
+    cb.addEventListener('change',()=>{
+      const i=+cb.dataset.idx; const v=cb.checked; setCheck(sid,i,v);
+      const lbl=document.getElementById(`chk-${sid}-${i}`);
+      if(lbl){ lbl.classList.toggle('checked',v); const m=lbl.querySelector('.check-mark'); if(v&&!m)lbl.insertAdjacentHTML('beforeend','<span class="check-mark">✓</span>'); else if(!v&&m)m.remove(); }
+    });
+  });
+  attachFooterNav();
+}
+
+function renderIcon(area){
+  const icon=gf('icon');
+  const checks=['アイコンを見てどんな投稿か分かるか','他に埋もれないデザインか','ターゲットにウケるデザインか','投稿内容に合う世界観か'];
+  area.innerHTML=card('A3','アイコン設定','プロフィールの第一印象を決める大切な要素です',`
+    <div class="field"><div class="icon-upload-wrap">
+      <div class="icon-preview">${icon?`<img src="${icon}" alt="icon">`:'<i class="ti ti-user" style="font-size:28px;color:#a09a93"></i>'}</div>
+      <div>
+        <label class="upload-label" for="icon-file"><i class="ti ti-upload"></i> 画像をアップロード</label>
+        <input type="file" id="icon-file" accept="image/*" style="display:none">
+        <p style="font-size:11px;color:#a09a93;margin-top:6px">JPG・PNG対応（2MB以下）</p>
+        ${icon?`<button id="del-icon" style="margin-top:6px;font-size:12px;color:#a09a93;background:none;border:none;cursor:pointer"><i class="ti ti-trash"></i> 削除</button>`:''}
+      </div>
+    </div></div>
+    <div class="field"><div class="field-label">チェックリスト</div>
+    <div class="checklist">${checks.map((c,i)=>{const chk=getCheck('a3',i);return`<label class="check-item${chk?' checked':''}" id="chk-a3-${i}"><input type="checkbox"${chk?' checked':''} data-sec="a3" data-idx="${i}"><span>${c}</span>${chk?'<span class="check-mark">✓</span>':''}</label>`;}).join('')}</div></div>`);
+  document.getElementById('icon-file').addEventListener('change',e=>{
+    const file=e.target.files[0]; if(!file) return;
+    const reader=new FileReader();
+    reader.onload=ev=>{ sf('icon',ev.target.result); renderIcon(area); };
+    reader.readAsDataURL(file);
+  });
+  const delBtn=document.getElementById('del-icon');
+  if(delBtn) delBtn.addEventListener('click',()=>{ sf('icon',''); renderIcon(area); });
+  document.querySelectorAll('[data-sec="a3"]').forEach(cb=>{
+    cb.addEventListener('change',()=>{
+      const i=+cb.dataset.idx; const v=cb.checked; setCheck('a3',i,v);
+      const lbl=document.getElementById(`chk-a3-${i}`);
+      if(lbl){ lbl.classList.toggle('checked',v); const m=lbl.querySelector('.check-mark'); if(v&&!m)lbl.insertAdjacentHTML('beforeend','<span class="check-mark">✓</span>'); else if(!v&&m)m.remove(); }
+    });
+  });
+  attachFooterNav();
+}
+
+function renderReel(area){
+  const checks=['冒頭1秒で引き込む構成か','音源と映像がマッチしているか','ペルソナの悩みを解決できるか','保存されやすい情報が入っているか','明確なアクション誘導があるか'];
+  area.innerHTML=card('A5','投稿・リール設計','チェックリストで投稿のクオリティを確認しましょう',`
+    <div class="field"><div class="field-label">投稿コンセプト・アイデア</div>
+    <textarea id="f-rc" rows="5" placeholder="どんな投稿をするか記入してください">${gf('reel_concept')}</textarea></div>
+    <div class="field"><div class="field-label">チェックリスト</div>
+    <div class="checklist">${checks.map((c,i)=>{const chk=getCheck('a5',i);return`<label class="check-item${chk?' checked':''}" id="chk-a5-${i}"><input type="checkbox"${chk?' checked':''} data-sec="a5" data-idx="${i}"><span>${c}</span>${chk?'<span class="check-mark">✓</span>':''}</label>`;}).join('')}</div></div>`);
+  document.getElementById('f-rc').addEventListener('input',e=>sf('reel_concept',e.target.value));
+  document.querySelectorAll('[data-sec="a5"]').forEach(cb=>{
+    cb.addEventListener('change',()=>{
+      const i=+cb.dataset.idx; const v=cb.checked; setCheck('a5',i,v);
+      const lbl=document.getElementById(`chk-a5-${i}`);
+      if(lbl){ lbl.classList.toggle('checked',v); const m=lbl.querySelector('.check-mark'); if(v&&!m)lbl.insertAdjacentHTML('beforeend','<span class="check-mark">✓</span>'); else if(!v&&m)m.remove(); }
+    });
+  });
+  attachFooterNav();
+}
+
+function renderIG(area){
+  const icon=gf('icon'); const name=gf('accname_final')||currentUser.displayName||'アカウント名';
+  const username=gf('username_final')||'username'; const bio=gf('profile_final')||'プロフィールを入力してください';
+  const concept=gf('concept_final'); const persona=gf('persona_summary');
+  const photos=['https://images.unsplash.com/photo-1490806843957-31f4c9a91c65?w=300&q=80','https://images.unsplash.com/photo-1528360983277-13d401cdc186?w=300&q=80','https://images.unsplash.com/photo-1504109586057-7a2ae83d1338?w=300&q=80','https://images.unsplash.com/photo-1540959733332-eab4deabeeaf?w=300&q=80','https://images.unsplash.com/photo-1493976040374-85c8e12f0c0e?w=300&q=80','https://images.unsplash.com/photo-1526481280693-3bfa7568e0f3?w=300&q=80','https://images.unsplash.com/photo-1545569341-9eb8b30979d9?w=300&q=80','https://images.unsplash.com/photo-1516663713099-efd8cadb6e92?w=300&q=80','https://images.unsplash.com/photo-1467269204594-9661b134dd2b?w=300&q=80'];
+  area.innerHTML=`<div class="ig-wrap">
+    <div class="ig-card">
+      <div class="ig-top">
+        <div class="ig-row">
+          <div class="ig-avatar"><div class="ig-av-inner">${icon?`<img src="${icon}" alt="">`:'<i class="ti ti-user" style="font-size:24px;color:#a09a93"></i>'}</div></div>
+          <div class="ig-stats"><div class="ig-stat"><span class="ig-stat-n">0</span><span class="ig-stat-l">投稿</span></div><div class="ig-stat"><span class="ig-stat-n">0</span><span class="ig-stat-l">フォロワー</span></div><div class="ig-stat"><span class="ig-stat-n">0</span><span class="ig-stat-l">フォロー中</span></div></div>
+        </div>
+        <div class="ig-username">@${username}</div>
+        <div class="ig-name">${name}</div>
+        <div class="ig-bio">${bio}</div>
+        ${concept?`<div class="ig-tag"><div class="ig-tag-label">コンセプト</div>${concept}</div>`:''}
+        ${persona?`<div class="ig-tag"><div class="ig-tag-label">ターゲット</div>${persona}</div>`:''}
+      </div>
+      <div class="ig-actions"><div class="ig-btn ig-btn-follow">フォローする</div><div class="ig-btn">メッセージ</div></div>
+      <div class="ig-divider"></div>
+      <div class="ig-grid">${photos.map(u=>`<div class="ig-cell"><img src="${u}" alt="" loading="lazy"></div>`).join('')}</div>
+    </div>
+  </div>
+  <div class="sec-footer-nav" style="max-width:440px;margin:16px auto 0">
+    <button class="sfn-btn" id="sfn-prev-ig"><i class="ti ti-chevron-left"></i> 前へ</button>
+    <span class="sfn-center">${ALL_WITH_IG.length} / ${ALL_WITH_IG.length}</span>
+    <button class="sfn-btn" id="sfn-next-ig" disabled>次へ <i class="ti ti-chevron-right"></i></button>
+  </div>`;
+  document.getElementById('sfn-prev-ig').addEventListener('click',()=>{ currentSec=ALL_WITH_IG[ALL_WITH_IG.length-2].id; renderApp(); });
+}
+
+// ── Admin ──
+function renderAdmin(area){
+  if(!allUsers.length){ area.innerHTML=`<div class="empty-state"><i class="ti ti-users"></i><p>まだユーザーが登録されていません</p></div>`; return; }
+  area.innerHTML=`<div class="admin-header"><div class="admin-title">管理者ビュー</div><div class="admin-sub">クリックして入力内容を確認（${allUsers.length}人）</div></div>
+    <div class="admin-grid">${allUsers.map(u=>{
+      const {pct,filled,total}=calcPct(u);
+      return `<div class="admin-card" data-uid="${u.uid}">
+        <div class="admin-card-top"><div class="admin-av">${u.photoURL?`<img src="${u.photoURL}" alt="">`:`<span>${(u.name||'?').charAt(0)}</span>`}</div>
+        <div><div class="admin-name">${u.name||u.email}</div><div class="admin-email">${u.email||''}</div></div></div>
+        <div class="admin-prog"><div class="admin-fill" style="width:${pct}%"></div></div>
+        <div class="admin-pct">${pct}% 完了（${filled}/${total}）</div>
+      </div>`;
+    }).join('')}</div>`;
+  document.querySelectorAll('.admin-card').forEach(card=>{
+    card.addEventListener('click',async()=>{
+      const uid=card.dataset.uid;
+      const snap=await getDoc(doc(db,'users',uid));
+      if(snap.exists()){ userData=snap.data(); currentSec='ig'; mode='user'; renderApp(); }
+    });
+  });
+}
+
+// ── Present Mode (スライド風) ──
+function renderPresentMode(){
+  const area=document.getElementById('main-content');
+  // 発表モードはfixedで全画面表示
+  const shell=document.createElement('div');
+  shell.className='present-shell';
+  shell.id='present-shell';
+  const sec=ALL_WITH_IG[presentIdx];
+  shell.innerHTML=`
+    <div class="present-topbar">
+      <div class="present-user">
+        <img src="${currentUser.photoURL||''}" alt="">
+        <div>
+          <div class="present-user-name">${currentUser.displayName||''}</div>
+          <div class="present-title">Creator Textbook — Cre8Club</div>
+        </div>
+      </div>
+      <div class="present-actions">
+        <button class="present-btn" id="p-fullscreen"><i class="ti ti-maximize"></i> 全画面</button>
+        <button class="present-btn exit" id="p-exit"><i class="ti ti-x"></i> 終了</button>
+      </div>
+    </div>
+    <div class="present-content" id="present-content"></div>
+    <div class="present-bottom">
+      <button class="present-nav-btn" id="p-prev" ${presentIdx===0?'disabled':''}><i class="ti ti-chevron-left"></i> 前へ</button>
+      <div style="text-align:center">
+        <div class="present-sec-label">${sec.num}. ${sec.label}</div>
+        <div class="present-counter">${presentIdx+1} / ${ALL_WITH_IG.length}</div>
+      </div>
+      <button class="present-nav-btn" id="p-next" ${presentIdx===ALL_WITH_IG.length-1?'disabled':''}>次へ <i class="ti ti-chevron-right"></i></button>
+    </div>`;
+  document.body.appendChild(shell);
+
+  document.getElementById('p-exit').addEventListener('click',()=>{ shell.remove(); mode='user'; renderApp(); });
+  document.getElementById('p-fullscreen').addEventListener('click',()=>{
+    if(!document.fullscreenElement) shell.requestFullscreen().catch(()=>{});
+    else document.exitFullscreen();
+  });
+  document.getElementById('p-prev').addEventListener('click',()=>{ if(presentIdx>0){ presentIdx--; shell.remove(); renderPresentMode(); } });
+  document.getElementById('p-next').addEventListener('click',()=>{ if(presentIdx<ALL_WITH_IG.length-1){ presentIdx++; shell.remove(); renderPresentMode(); } });
+
+  renderSlide(document.getElementById('present-content'), sec);
+}
+
+function renderSlide(container, sec){
+  container.innerHTML=`<div class="slide-card">${buildSlide(sec)}</div>`;
+}
+
+function buildSlide(sec){
+  const v=(f,fallback='')=>{ const val=gf(f); return val||fallback; };
+  const empty=(t)=>`<span class="slide-value empty">${t}</span>`;
+  const val=(f,fb)=>{ const vl=gf(f); return vl?`<div class="slide-value">${vl}</div>`:empty(fb); };
+
+  switch(sec.id){
+    case 's01':{
+      const rows=[{k:'purpose',l:'運用目的'},{k:'kgi',l:'KGI 半年目標'},{k:'kpi1',l:'KPI 1か月目'},{k:'kpi3',l:'KPI 3か月目'},{k:'kpi6',l:'KPI 6か月目'}];
+      return `<div class="slide-num">01</div><div class="slide-title">KGI / KPI 設定</div>
+        <table class="slide-kgi-table">
+          <thead><tr><th>項目</th><th>概要・気持ち目標</th><th>数値目標</th></tr></thead>
+          <tbody>${rows.map(r=>`<tr>
+            <td>${r.l}</td>
+            <td>${gf(r.k+'_text')||'<span style="color:#d4cfc8;font-style:italic">未入力</span>'}</td>
+            <td>${gf(r.k+'_num')||'<span style="color:#d4cfc8">—</span>'}</td>
+          </tr>`).join('')}</tbody>
+        </table>`;
+    }
+    case 's02': return `<div class="slide-num">02</div><div class="slide-title">自分の強み分析</div>
+      <div class="slide-row"><div class="slide-label">強みリスト</div>${val('strengths_list','未入力')}</div>
+      <div class="slide-row"><div class="slide-label">強みまとめ</div>${val('strengths_summary','未入力')}</div>`;
+    case 's03': return `<div class="slide-num">03</div><div class="slide-title">インスタニーズマップ</div>
+      <div class="slide-row">${val('needs','未入力')}</div>`;
+    case 's04': return `<div class="slide-num">04</div><div class="slide-title">自分の強み × ニーズ</div>
+      <div class="slide-row">${val('cross','未入力')}</div>`;
+    case 's05':{
+      const flds=[['persona_gender','性別'],['persona_age','年齢'],['persona_area','地域'],['persona_job','仕事'],['persona_income','年収'],['persona_married','既婚・未婚'],['persona_hobby','趣味'],['persona_worry','悩み']];
+      return `<div class="slide-num">05</div><div class="slide-title">ペルソナ設定</div>
+        <div class="slide-grid">${flds.map(([k,l])=>`<div class="slide-box"><div class="slide-label">${l}</div><div class="slide-value" style="font-size:15px">${gf(k)||'<span style="color:#d4cfc8">—</span>'}</div></div>`).join('')}</div>
+        ${gf('persona_summary')?`<div class="slide-row" style="margin-top:14px"><div class="slide-label">ペルソナまとめ</div><div class="slide-value" style="font-size:17px;font-weight:600;color:#E1306C">${gf('persona_summary')}</div></div>`:''}`;
+    }
+    case 's06': return `<div class="slide-num">06</div><div class="slide-title">仮コンセプト設計</div>
+      <div class="slide-row">${val('concept_draft','未入力')}</div>`;
+    case 's07':{
+      let rivals=[]; try{rivals=JSON.parse(gf('rivals')||'[]');}catch(e){}
+      return `<div class="slide-num">07</div><div class="slide-title">競合リサーチ</div>
+        ${rivals.length?rivals.filter(r=>r.name||r.strength).map(r=>`<div class="slide-rival-item"><div class="slide-rival-name">@${r.name||'—'} <span style="font-size:12px;color:#a09a93">${r.followers||''}</span></div><div class="slide-rival-detail">${r.strength||'—'}</div></div>`).join(''):'<div class="slide-value empty">競合リサーチデータなし</div>'}`;
+    }
+    case 's08':{
+      let posts=[]; try{posts=JSON.parse(gf('top_posts')||'[]');}catch(e){}
+      return `<div class="slide-num">08</div><div class="slide-title">伸び投稿リサーチ</div>
+        ${posts.length?posts.filter(p=>p.account||p.reason).map(p=>`<div class="slide-rival-item"><div class="slide-rival-name">${p.title||p.account||'—'}</div><div class="slide-rival-detail">${p.reason||'—'}</div></div>`).join(''):'<div class="slide-value empty">伸び投稿データなし</div>'}`;
+    }
+    case 's09': return `<div class="slide-num">09</div><div class="slide-title">独自テーマ発掘</div>
+      ${[['theme_gap','競合の空白ポジション'],['theme_trend','伸びる投稿の傾向'],['theme_continue','続けられるテーマ'],['theme_enjoy','楽しめるテーマ'],['theme','独自テーマ（まとめ）']].map(([k,l])=>gf(k)?`<div class="slide-row"><div class="slide-label">${l}</div><div class="slide-value">${gf(k)}</div></div>`:'').join('')}`;
+    case 's10': return `<div class="slide-num">10</div><div class="slide-title">正式コンセプト設計</div>
+      <div class="slide-row">${gf('concept_final')?`<div class="slide-value" style="font-size:20px;font-weight:700;color:#E1306C;line-height:1.5">${gf('concept_final')}</div>`:`<span class="slide-value empty">コンセプト未確定</span>`}</div>
+      ${gf('concept_ok')?`<div style="margin-top:12px;display:inline-flex;align-items:center;gap:6px;background:#fce8f0;color:#E1306C;padding:6px 14px;border-radius:20px;font-size:13px;font-weight:600"><i class="ti ti-check"></i> 確定済み</div>`:''}`;
+    case 'a1': return `<div class="slide-num">A1</div><div class="slide-title">ユーザーネーム設定</div>
+      <div class="slide-row"><div class="slide-label">候補</div>${val('username_candidate','未入力')}</div>
+      <div class="slide-row"><div class="slide-label">確定ユーザーネーム</div>${gf('username_final')?`<div class="slide-value" style="font-size:22px;font-weight:700;color:#E1306C">@${gf('username_final')}</div>`:empty('未確定')}</div>`;
+    case 'a2': return `<div class="slide-num">A2</div><div class="slide-title">アカウント名設定</div>
+      <div class="slide-row"><div class="slide-label">候補</div>${val('accname_candidate','未入力')}</div>
+      <div class="slide-row"><div class="slide-label">確定アカウント名</div>${gf('accname_final')?`<div class="slide-value" style="font-size:20px;font-weight:700">${gf('accname_final')}</div>`:empty('未確定')}</div>`;
+    case 'a3':{
+      const icon=gf('icon');
+      return `<div class="slide-num">A3</div><div class="slide-title">アイコン設定</div>
+        <div style="text-align:center;margin:20px 0">
+          <div style="width:100px;height:100px;border-radius:50%;margin:0 auto;overflow:hidden;background:#f5f4f2;border:3px solid #e8e5e0;display:flex;align-items:center;justify-content:center">
+            ${icon?`<img src="${icon}" style="width:100%;height:100%;object-fit:cover">`:'<i class="ti ti-user" style="font-size:36px;color:#a09a93"></i>'}
+          </div>
+        </div>`;
+    }
+    case 'a4': return `<div class="slide-num">A4</div><div class="slide-title">プロフィール設計</div>
+      <div class="slide-row"><div class="slide-label">候補</div>${val('profile_candidate','未入力')}</div>
+      <div class="slide-row"><div class="slide-label">確定プロフィール</div>${val('profile_final','未確定')}</div>`;
+    case 'a5': return `<div class="slide-num">A5</div><div class="slide-title">投稿・リール設計</div>
+      <div class="slide-row">${val('reel_concept','未入力')}</div>`;
+    case 'ig':{
+      const icon=gf('icon'); const name=gf('accname_final')||currentUser.displayName||'アカウント名';
+      const username=gf('username_final')||'username'; const bio=gf('profile_final')||'プロフィールを入力してください';
+      const concept=gf('concept_final'); const persona=gf('persona_summary');
+      return `<div class="slide-num" style="background:linear-gradient(135deg,#f09433,#dc2743,#bc1888)">★</div>
+        <div class="slide-title">Your Account Information</div>
+        <div class="slide-ig-wrap">
+          <div class="ig-card">
+            <div class="ig-top">
+              <div class="ig-row">
+                <div class="ig-avatar"><div class="ig-av-inner">${icon?`<img src="${icon}" alt="">`:'<i class="ti ti-user" style="font-size:24px;color:#a09a93"></i>'}</div></div>
+                <div class="ig-stats"><div class="ig-stat"><span class="ig-stat-n">0</span><span class="ig-stat-l">投稿</span></div><div class="ig-stat"><span class="ig-stat-n">0</span><span class="ig-stat-l">フォロワー</span></div><div class="ig-stat"><span class="ig-stat-n">0</span><span class="ig-stat-l">フォロー中</span></div></div>
+              </div>
+              <div class="ig-username">@${username}</div>
+              <div class="ig-name">${name}</div>
+              <div class="ig-bio">${bio}</div>
+              ${concept?`<div class="ig-tag"><div class="ig-tag-label">コンセプト</div>${concept}</div>`:''}
+              ${persona?`<div class="ig-tag"><div class="ig-tag-label">ターゲット</div>${persona}</div>`:''}
+            </div>
+            <div class="ig-actions"><div class="ig-btn ig-btn-follow">フォローする</div><div class="ig-btn">メッセージ</div></div>
+          </div>
+        </div>`;
+    }
+    default: return `<div class="slide-value empty">このセクションのデータはありません</div>`;
+  }
+}
+</script>
 </body>
 </html>
