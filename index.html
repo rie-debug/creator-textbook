@@ -265,6 +265,14 @@ function renderApp() {
     </div>`;
 
   renderContent();
+
+  // ドロップダウン外クリックで閉じる
+  document.getElementById('app').addEventListener('click', (e) => {
+    if (!e.target.closest('.nav-group')) {
+      document.querySelectorAll('.nav-group-items').forEach(el => el.classList.remove('open'));
+      document.querySelectorAll('[id$="-chevron"]').forEach(el => el.style.transform = 'rotate(0deg)');
+    }
+  });
 }
 
 function renderNav() {
@@ -302,17 +310,18 @@ window.toggleGroup = (id) => {
   const chevron = document.getElementById(`${id}-chevron`);
   if (!items) return;
   const isOpen = items.classList.contains('open');
+  // 他のドロップダウンを閉じる
+  document.querySelectorAll('.nav-group-items').forEach(el => {
+    if (el.id !== `${id}-items`) {
+      el.classList.remove('open');
+    }
+  });
+  document.querySelectorAll('[id$="-chevron"]').forEach(el => {
+    if (el.id !== `${id}-chevron`) el.style.transform = 'rotate(0deg)';
+  });
   items.classList.toggle('open', !isOpen);
   if (chevron) chevron.style.transform = isOpen ? 'rotate(0deg)' : 'rotate(180deg)';
 };
-
-// ドロップダウン外クリックで閉じる
-document.addEventListener('click', (e) => {
-  if (!e.target.closest('.nav-group')) {
-    document.querySelectorAll('.nav-group-items').forEach(el => el.classList.remove('open'));
-    document.querySelectorAll('.nav-group-items + .ti-chevron-down, [id$="-chevron"]').forEach(el => el.style.transform = 'rotate(0deg)');
-  }
-});
 
 window.setMode = (m) => {
   mode = m;
@@ -600,30 +609,39 @@ function renderPresent(area) {
 function renderPresentContent(secId) {
   const body = document.getElementById('present-body');
   if (!body) return;
-  // present-bodyを一時的にmain-contentとして使ってレンダリング
-  const orig = document.getElementById('main-content');
-  const tempArea = body;
-  tempArea.innerHTML = '';
+  body.innerHTML = '';
   currentSec = secId;
-  // 各セクションのレンダラーを直接呼ぶ
   switch(secId) {
-    case 's01': renderKGI(tempArea); break;
-    case 's02': renderStrengths(tempArea); break;
-    case 's03': renderTextSec(tempArea,'s03','03','インスタニーズマップ','インスタユーザーが求めているものを書き出しましょう','needs','・行った気になれる体験\n・絶景・穴場スポット情報\n・真似できる編集テクニック\n・旅行計画のヒント'); break;
-    case 's04': renderTextSec(tempArea,'s04','04','自分の強み × ニーズ','強みとニーズを掛け合わせてポジションを見つけましょう','cross','例）大阪在住 × 関西穴場情報ニーズ → 関西特化の絶景スポット紹介'); break;
-    case 's05': renderPersona(tempArea); break;
-    case 's06': renderTextSec(tempArea,'s06','06','仮コンセプト設計','強み × ニーズ × ペルソナを一文にまとめましょう','concept_draft','例）週末だけ旅する20代女性のために、関西の映える穴場スポットをショート動画で届けるクリエイター'); break;
-    case 's07': renderRivals(tempArea); break;
-    case 's08': renderTopPosts(tempArea); break;
-    case 's09': renderTheme(tempArea); break;
-    case 's10': renderConceptFinal(tempArea); break;
-    case 'a1': renderCheckSec(tempArea,'a1','A1','ユーザーネーム設定',['ジャンルのキーワードが入っているか','短くて覚えやすいか','他のアカウントと被っていないか','長く使い続けられるか'],'username_candidate','username_final','確定ユーザーネーム'); break;
-    case 'a2': renderCheckSec(tempArea,'a2','A2','アカウント名設定',['検索されうるキーワードが入っているか','名前も入っているか','キーワードと名前の順番が正しいか','GoogleのSEOを意識できているか'],'accname_candidate','accname_final','確定アカウント名'); break;
-    case 'a3': renderIconSec(tempArea); break;
-    case 'a4': renderCheckSec(tempArea,'a4','A4','プロフィール設計',['箇条書きになっているか','投稿しているジャンルが明記されているか','中学生でも分かりやすいか','フォローするメリットが伝わるか','このアカウントの説明になっているか'],'profile_candidate','profile_final','確定プロフィール',true); break;
-    case 'a5': renderReelSec(tempArea); break;
-    case 'ig': renderIG(tempArea); break;
+    case 's01': renderKGI(body); break;
+    case 's02': renderStrengths(body); break;
+    case 's03': renderTextSec(body,'s03','03','インスタニーズマップ','インスタユーザーが求めているものを書き出しましょう','needs','・行った気になれる体験\n・絶景・穴場スポット情報\n・真似できる編集テクニック\n・旅行計画のヒント'); break;
+    case 's04': renderTextSec(body,'s04','04','自分の強み × ニーズ','強みとニーズを掛け合わせてポジションを見つけましょう','cross','例）大阪在住 × 関西穴場情報ニーズ → 関西特化の絶景スポット紹介'); break;
+    case 's05': renderPersona(body); break;
+    case 's06': renderTextSec(body,'s06','06','仮コンセプト設計','強み × ニーズ × ペルソナを一文にまとめましょう','concept_draft','例）週末だけ旅する20代女性のために、関西の映える穴場スポットをショート動画で届けるクリエイター'); break;
+    case 's07': renderRivals(body); break;
+    case 's08': renderTopPosts(body); break;
+    case 's09': renderTheme(body); break;
+    case 's10': renderConceptFinal(body); break;
+    case 'a1': renderCheckSec(body,'a1','A1','ユーザーネーム設定',['ジャンルのキーワードが入っているか','短くて覚えやすいか','他のアカウントと被っていないか','長く使い続けられるか'],'username_candidate','username_final','確定ユーザーネーム'); break;
+    case 'a2': renderCheckSec(body,'a2','A2','アカウント名設定',['検索されうるキーワードが入っているか','名前も入っているか','キーワードと名前の順番が正しいか','GoogleのSEOを意識できているか'],'accname_candidate','accname_final','確定アカウント名'); break;
+    case 'a3': renderIconSec(body); break;
+    case 'a4': renderCheckSec(body,'a4','A4','プロフィール設計',['箇条書きになっているか','投稿しているジャンルが明記されているか','中学生でも分かりやすいか','フォローするメリットが伝わるか','このアカウントの説明になっているか'],'profile_candidate','profile_final','確定プロフィール',true); break;
+    case 'a5': renderReelSec(body); break;
+    case 'ig': renderIG(body); break;
   }
+  // 発表モードは全入力要素を読み取り専用に
+  body.querySelectorAll('input, textarea').forEach(el => {
+    el.setAttribute('readonly', true);
+    el.style.cursor = 'default';
+    el.style.background = 'transparent';
+  });
+  body.querySelectorAll('button:not(.nav-btn)').forEach(el => {
+    el.style.display = 'none';
+  });
+  body.querySelectorAll('.add-row-btn').forEach(el => el.style.display = 'none');
+  body.querySelectorAll('input[type=checkbox]').forEach(el => el.setAttribute('disabled', true));
+  body.querySelectorAll('input[type=file]').forEach(el => el.setAttribute('disabled', true));
+  body.querySelectorAll('.upload-label').forEach(el => el.style.display = 'none');
 }
 
 window.presNav=(d)=>{
@@ -645,18 +663,27 @@ body{font-family:'DM Sans',sans-serif;background:#f5f4f2;color:#1a1816;font-size
 .app-shell{display:flex;flex-direction:column;min-height:100vh}
 
 /* Header */
-.top-header{background:#0d1b2a;padding:0 24px;height:56px;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-shrink:0;position:sticky;top:0;z-index:100}
-.header-left{display:flex;align-items:baseline;gap:8px}
+.top-header{background:#0d1b2a;padding:0 16px;height:56px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-shrink:0;position:sticky;top:0;z-index:100}
+.header-left{display:flex;align-items:baseline;gap:8px;flex-shrink:0}
 .logo{font-size:16px;font-weight:600;color:#fff;letter-spacing:-.3px}
 .logo span{color:#ff6b9d}
 .logo-sub{font-size:10px;color:rgba(255,255,255,.4);font-family:'DM Mono',monospace}
-.header-center{flex:1;display:flex;justify-content:center}
-.header-right{display:flex;align-items:center;gap:10px;color:#fff}
+.header-center{flex:1;display:flex;justify-content:center;min-width:0}
+.header-right{display:flex;align-items:center;gap:8px;color:#fff;flex-shrink:0}
+.header-right span{font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100px}
 .mode-tabs{display:flex;gap:2px;background:rgba(255,255,255,.1);padding:3px;border-radius:8px}
-.mode-tab{padding:5px 14px;font-size:12px;border-radius:6px;border:none;background:none;color:rgba(255,255,255,.6);cursor:pointer;font-family:'DM Sans',sans-serif;display:flex;align-items:center;gap:5px;transition:all .12s}
+.mode-tab{padding:5px 10px;font-size:13px;font-weight:500;border-radius:6px;border:none;background:none;color:rgba(255,255,255,.6);cursor:pointer;font-family:'DM Sans',sans-serif;display:flex;align-items:center;gap:4px;transition:all .12s;white-space:nowrap}
 .mode-tab.active{background:rgba(255,255,255,.18);color:#fff;font-weight:600}
-.btn-ghost{background:none;border:none;color:rgba(255,255,255,.6);cursor:pointer;font-size:16px;padding:4px;border-radius:6px}
+.mode-tab i{font-size:14px}
+.btn-ghost{background:none;border:none;color:rgba(255,255,255,.6);cursor:pointer;font-size:16px;padding:4px;border-radius:6px;flex-shrink:0}
 .btn-ghost:hover{color:#fff;background:rgba(255,255,255,.1)}
+@media(max-width:600px){
+  .logo-sub{display:none}
+  .header-right span{display:none}
+  .mode-tab{padding:5px 8px;font-size:12px}
+  .mode-tab i{display:none}
+  .top-header{padding:0 10px;gap:6px}
+}
 
 /* Section Nav */
 .sec-nav{background:#fff;border-bottom:1px solid #e8e5e0;display:flex;align-items:stretch;flex-shrink:0}
