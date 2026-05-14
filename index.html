@@ -301,10 +301,18 @@ window.toggleGroup = (id) => {
   const items = document.getElementById(`${id}-items`);
   const chevron = document.getElementById(`${id}-chevron`);
   if (!items) return;
-  const isOpen = items.style.display !== 'none';
-  items.style.display = isOpen ? 'none' : 'flex';
-  if (chevron) chevron.style.transform = isOpen ? 'rotate(-90deg)' : 'rotate(0deg)';
+  const isOpen = items.classList.contains('open');
+  items.classList.toggle('open', !isOpen);
+  if (chevron) chevron.style.transform = isOpen ? 'rotate(0deg)' : 'rotate(180deg)';
 };
+
+// ドロップダウン外クリックで閉じる
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.nav-group')) {
+    document.querySelectorAll('.nav-group-items').forEach(el => el.classList.remove('open'));
+    document.querySelectorAll('.nav-group-items + .ti-chevron-down, [id$="-chevron"]').forEach(el => el.style.transform = 'rotate(0deg)');
+  }
+});
 
 window.setMode = (m) => {
   mode = m;
@@ -565,19 +573,11 @@ function renderAdmin(area) {
 window.viewUserAdmin = async (uid) => {
   const snap = await getDoc(doc(db, 'users', uid));
   const data = snap.exists() ? snap.data() : {};
-  // 一時的にudataを差し替えてIGプロフィールを表示
-  const origData = userData;
   userData = data;
   viewingUid = uid;
   currentSec = 'ig';
   mode = 'user';
-  document.querySelectorAll('.mode-tab').forEach((t,i)=>t.classList.toggle('active',i===0));
   renderApp();
-  userData = origData;
-  viewingUid = currentUser.uid;
-  // 再度差し替え
-  userData = data;
-  renderContent();
 };
 
 // ── Present ──
@@ -593,26 +593,44 @@ function renderPresent(area) {
       <button class="nav-btn" onclick="presNav(1)" ${presentIdx===allS.length-1?'disabled':''}>次へ <i class="ti ti-chevron-right"></i></button>
     </div>
   </div>
-  <div id="present-body"></div>`;
-  currentSec = sec.id;
-  renderContent();
-  // present-bodyにコンテンツを移動
+  <div id="present-body" class="present-body"></div>`;
+  renderPresentContent(sec.id);
+}
+
+function renderPresentContent(secId) {
   const body = document.getElementById('present-body');
-  const mainContent = document.getElementById('main-content');
-  if (body && mainContent) {
-    const inner = mainContent.querySelector('.form-card,.ig-wrap');
-    if (inner) body.appendChild(inner);
+  if (!body) return;
+  // present-bodyを一時的にmain-contentとして使ってレンダリング
+  const orig = document.getElementById('main-content');
+  const tempArea = body;
+  tempArea.innerHTML = '';
+  currentSec = secId;
+  // 各セクションのレンダラーを直接呼ぶ
+  switch(secId) {
+    case 's01': renderKGI(tempArea); break;
+    case 's02': renderStrengths(tempArea); break;
+    case 's03': renderTextSec(tempArea,'s03','03','インスタニーズマップ','インスタユーザーが求めているものを書き出しましょう','needs','・行った気になれる体験\n・絶景・穴場スポット情報\n・真似できる編集テクニック\n・旅行計画のヒント'); break;
+    case 's04': renderTextSec(tempArea,'s04','04','自分の強み × ニーズ','強みとニーズを掛け合わせてポジションを見つけましょう','cross','例）大阪在住 × 関西穴場情報ニーズ → 関西特化の絶景スポット紹介'); break;
+    case 's05': renderPersona(tempArea); break;
+    case 's06': renderTextSec(tempArea,'s06','06','仮コンセプト設計','強み × ニーズ × ペルソナを一文にまとめましょう','concept_draft','例）週末だけ旅する20代女性のために、関西の映える穴場スポットをショート動画で届けるクリエイター'); break;
+    case 's07': renderRivals(tempArea); break;
+    case 's08': renderTopPosts(tempArea); break;
+    case 's09': renderTheme(tempArea); break;
+    case 's10': renderConceptFinal(tempArea); break;
+    case 'a1': renderCheckSec(tempArea,'a1','A1','ユーザーネーム設定',['ジャンルのキーワードが入っているか','短くて覚えやすいか','他のアカウントと被っていないか','長く使い続けられるか'],'username_candidate','username_final','確定ユーザーネーム'); break;
+    case 'a2': renderCheckSec(tempArea,'a2','A2','アカウント名設定',['検索されうるキーワードが入っているか','名前も入っているか','キーワードと名前の順番が正しいか','GoogleのSEOを意識できているか'],'accname_candidate','accname_final','確定アカウント名'); break;
+    case 'a3': renderIconSec(tempArea); break;
+    case 'a4': renderCheckSec(tempArea,'a4','A4','プロフィール設計',['箇条書きになっているか','投稿しているジャンルが明記されているか','中学生でも分かりやすいか','フォローするメリットが伝わるか','このアカウントの説明になっているか'],'profile_candidate','profile_final','確定プロフィール',true); break;
+    case 'a5': renderReelSec(tempArea); break;
+    case 'ig': renderIG(tempArea); break;
   }
 }
+
 window.presNav=(d)=>{
   const allS=[...ALL_SECTIONS,SEC_IG];
   presentIdx=Math.max(0,Math.min(allS.length-1,presentIdx+d));
-  renderContent();
-  setTimeout(()=>{
-    const body=document.getElementById('present-body');
-    const mainContent=document.getElementById('main-content');
-    if(body&&mainContent){const inner=mainContent.querySelector('.form-card,.ig-wrap');if(inner)body.appendChild(inner);}
-  },50);
+  const area = document.getElementById('main-content');
+  if(area) renderPresent(area);
 };
 
 window.sf = sf;
@@ -644,14 +662,17 @@ body{font-family:'DM Sans',sans-serif;background:#f5f4f2;color:#1a1816;font-size
 .sec-nav{background:#fff;border-bottom:1px solid #e8e5e0;display:flex;align-items:stretch;flex-shrink:0}
 .sec-nav-inner{display:flex;align-items:stretch;flex:1;overflow-x:auto;padding:0 8px}
 .nav-group{position:relative;display:flex;align-items:stretch}
-.nav-group-btn{padding:0 14px;font-size:12px;font-weight:600;border:none;background:none;color:#6b6560;cursor:pointer;display:flex;align-items:center;gap:5px;height:44px;border-bottom:2px solid transparent;transition:all .12s;white-space:nowrap;font-family:'DM Sans',sans-serif}
-.nav-group-btn:hover{color:#1a1816;background:#f5f4f2}
-.nav-group-items{position:absolute;top:100%;left:0;background:#fff;border:1px solid #e8e5e0;border-radius:10px;box-shadow:0 4px 20px rgba(0,0,0,.1);z-index:50;min-width:200px;padding:6px;display:flex;flex-direction:column;gap:2px}
-.nav-item{padding:7px 12px;font-size:12px;border:none;background:none;color:#6b6560;cursor:pointer;display:flex;align-items:center;gap:8px;border-radius:7px;transition:all .1s;font-family:'DM Sans',sans-serif;white-space:nowrap;width:100%;text-align:left}
-.nav-item:hover{background:#f5f4f2;color:#1a1816}
+.nav-group-btn{padding:0 16px;font-size:15px;font-weight:600;border:none;background:none;color:#6b6560;cursor:pointer;display:flex;align-items:center;gap:6px;height:48px;border-bottom:2px solid transparent;transition:all .12s;white-space:nowrap;font-family:'DM Sans',sans-serif}
+.nav-group-btn:hover{color:#E1306C;background:#fce8f0}
+.nav-group-btn:hover i{color:#E1306C}
+.nav-group-items{display:none;position:absolute;top:100%;left:0;background:#fff;border:1px solid #e8e5e0;border-radius:10px;box-shadow:0 4px 20px rgba(0,0,0,.12);z-index:50;min-width:220px;padding:6px;flex-direction:column;gap:2px}
+.nav-group-items.open{display:flex}
+.nav-item{padding:9px 14px;font-size:15px;border:none;background:none;color:#6b6560;cursor:pointer;display:flex;align-items:center;gap:8px;border-radius:7px;transition:all .1s;font-family:'DM Sans',sans-serif;white-space:nowrap;width:100%;text-align:left}
+.nav-item:hover{background:#fce8f0;color:#E1306C}
+.nav-item:hover .nav-num{color:#E1306C}
 .nav-item.active{background:#fce8f0;color:#E1306C;font-weight:600}
 .nav-item.done .nav-done-dot{display:block}
-.nav-num{font-family:'DM Mono',monospace;font-size:10px;color:#a09a93;width:20px;flex-shrink:0}
+.nav-num{font-family:'DM Mono',monospace;font-size:11px;color:#a09a93;width:22px;flex-shrink:0}
 .nav-item.active .nav-num{color:#E1306C}
 .nav-done-dot{display:none;width:6px;height:6px;border-radius:50%;background:#0f9e7b;margin-left:auto;flex-shrink:0}
 .nav-progress{padding:12px 16px;border-left:1px solid #e8e5e0;min-width:180px;display:flex;flex-direction:column;justify-content:center}
@@ -755,10 +776,11 @@ body{font-family:'DM Sans',sans-serif;background:#f5f4f2;color:#1a1816;font-size
 
 /* Present */
 .present-bar{background:#fff;border:1px solid #e8e5e0;border-radius:14px;padding:12px 16px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
-.present-label{font-size:12px;font-weight:600;color:#E1306C;display:flex;align-items:center;gap:6px}
+.present-label{font-size:13px;font-weight:600;color:#E1306C;display:flex;align-items:center;gap:6px}
 .present-nav{display:flex;align-items:center;gap:8px}
-.present-sec-name{font-size:13px;font-weight:600}
+.present-sec-name{font-size:14px;font-weight:600}
 .present-counter{font-size:11px;color:#a09a93;font-family:'DM Mono',monospace}
+.present-body{width:100%}
 .nav-btn{padding:6px 12px;font-size:12px;border-radius:8px;border:1px solid #d4cfc8;background:#fff;color:#1a1816;cursor:pointer;font-family:'DM Sans',sans-serif;display:flex;align-items:center;gap:4px;transition:all .12s}
 .nav-btn:hover:not(:disabled){border-color:#E1306C;color:#E1306C}
 .nav-btn:disabled{opacity:.35;cursor:default}
